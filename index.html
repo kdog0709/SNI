@@ -1,0 +1,1324 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>서울6본부 OKR 평가 시스템 v3</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,'Apple SD Gothic Neo','Noto Sans KR',sans-serif;background:#f4f6fb;color:#222;font-size:14px;height:100vh;overflow:hidden}
+#loadingScreen{position:fixed;inset:0;background:linear-gradient(135deg,#f0187a,#9c0e52);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:9999;gap:16px;transition:opacity 0.4s}
+#loadingScreen.hide{opacity:0;pointer-events:none}
+.ld-logo{width:64px;height:64px;background:rgba(255,255,255,0.2);border-radius:18px;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:18px;color:white;letter-spacing:-1px}
+.ld-text{color:white;font-size:18px;font-weight:700}
+.spinner{width:28px;height:28px;border:3px solid rgba(255,255,255,0.3);border-top-color:white;border-radius:50%;animation:spin 0.8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+#loginScreen{display:none;position:fixed;inset:0;background:linear-gradient(135deg,#f0187a 0%,#a30d55 100%);align-items:center;justify-content:center;z-index:8888}
+#loginScreen.show{display:flex}
+.lcard{background:white;border-radius:22px;padding:36px 32px;width:440px;max-width:92vw;box-shadow:0 24px 60px rgba(0,0,0,0.2)}
+.llogo{display:flex;align-items:center;gap:12px;margin-bottom:24px}
+.llogo-box{width:44px;height:44px;background:linear-gradient(135deg,#f0187a,#a30d55);border-radius:13px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:900;color:white}
+.llogo-txt{font-size:16px;font-weight:700;color:#111;line-height:1.3}
+.llogo-txt small{display:block;font-size:11px;color:#888;font-weight:400}
+.ltitle{font-size:20px;font-weight:700;color:#111;margin-bottom:3px}
+.lsub{font-size:12px;color:#888;margin-bottom:22px}
+.lerr{background:#fee2e2;color:#991b1b;border-radius:8px;padding:10px 12px;font-size:12px;margin-bottom:10px;display:none}
+.lerr.show{display:block}
+.lfg{margin-bottom:11px}
+.lfl{font-size:11px;font-weight:600;color:#555;margin-bottom:4px;display:block}
+.lfi{width:100%;padding:10px 12px;border:1.5px solid #ddd;border-radius:9px;font-family:inherit;font-size:13px;transition:border-color 0.15s}
+.lfi:focus{outline:none;border-color:#e91e8c}
+.lbtn{width:100%;padding:12px;background:linear-gradient(135deg,#f0187a,#a30d55);color:white;border:none;border-radius:9px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;margin-top:4px}
+.lbtn:hover{opacity:0.9}
+.lbtn:disabled{opacity:0.6;cursor:not-allowed}
+.ldemo{margin-top:14px;background:#f8f9fa;border-radius:9px;padding:12px 14px;font-size:11px;color:#555;line-height:1.8}
+.ldemo strong{color:#e91e8c;display:block;margin-bottom:2px;font-size:12px}
+.ldemo-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:8px}
+.ldemo-acc{background:white;border-radius:7px;padding:8px 10px;border:1px solid #eee;cursor:pointer;transition:border-color 0.15s}
+.ldemo-acc:hover{border-color:#e91e8c}
+.ldemo-acc .role{font-size:10px;color:#e91e8c;font-weight:700}
+.ldemo-acc .nm{font-size:12px;font-weight:700;color:#111}
+.ldemo-acc .em{font-size:10px;color:#888}
+#app{display:none;height:100vh}
+#app.show{display:flex}
+.sb{width:220px;min-width:220px;background:linear-gradient(175deg,#f0187a 0%,#c40f65 55%,#a30d55 100%);display:flex;flex-direction:column;overflow-y:auto}
+.sb-brand{padding:16px 14px 12px;border-bottom:1px solid rgba(255,255,255,0.12)}
+.brow{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.blog{width:38px;height:38px;background:rgba(255,255,255,0.2);border-radius:10px;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:12px;color:white;flex-shrink:0}
+.btxt{color:white;font-size:13px;font-weight:700;line-height:1.3}
+.btxt small{display:block;font-size:10px;font-weight:400;color:rgba(255,255,255,0.65)}
+.urole{font-size:10px;color:rgba(255,255,255,0.6)}
+.uname{font-size:15px;font-weight:700;color:white}
+.uorg{font-size:10px;color:rgba(255,255,255,0.55);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:190px}
+.sbnav{flex:1;padding:6px 0}
+.ni{display:flex;align-items:center;gap:9px;padding:9px 12px;cursor:pointer;color:rgba(255,255,255,0.8);font-size:12px;transition:all 0.12s}
+.ni:hover{background:rgba(255,255,255,0.1);color:white}
+.ni.active{background:white;color:#e91e8c;font-weight:700;margin:2px 8px;border-radius:9px;padding:9px 8px}
+.nicon{font-size:14px;width:20px;text-align:center;flex-shrink:0}
+.sbfoot{padding:10px 12px;border-top:1px solid rgba(255,255,255,0.12)}
+.logbtn{width:100%;padding:8px;background:rgba(255,255,255,0.12);color:white;border:1px solid rgba(255,255,255,0.2);border-radius:8px;cursor:pointer;font-family:inherit;font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:5px}
+.logbtn:hover{background:rgba(255,255,255,0.22)}
+.mw{flex:1;display:flex;flex-direction:column;min-width:0;overflow:hidden}
+.topbar{height:48px;background:white;border-bottom:1px solid #eee;display:flex;align-items:center;justify-content:space-between;padding:0 22px;flex-shrink:0}
+.tb-l{display:flex;align-items:center;gap:10px;font-size:12px;color:#666}
+.tb-dot{width:8px;height:8px;background:#10b981;border-radius:50%}
+.content{flex:1;overflow-y:auto;padding:24px 28px;background:#f4f6fb}
+.ph{margin-bottom:20px}
+.ptitle{font-size:22px;font-weight:700;color:#111;margin-bottom:3px}
+.psub{font-size:12px;color:#888}
+.card{background:white;border-radius:13px;border:1px solid #eee;margin-bottom:16px;overflow:hidden}
+.sh{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid #f0f0f0}
+.stit{font-size:13px;font-weight:700;color:#111}
+.ssub{font-size:11px;color:#aaa;margin-top:2px}
+.sg{display:grid;grid-template-columns:repeat(4,1fr);gap:11px;margin-bottom:18px}
+.sc{background:white;border-radius:13px;padding:15px 17px;border:1px solid #eee}
+.sn{font-size:24px;font-weight:700;color:#111;line-height:1;margin-bottom:3px}
+.sl{font-size:11px;color:#888}
+.stag{font-size:10px;font-weight:600;margin-top:5px;display:inline-block;padding:2px 7px;border-radius:20px}
+.qg{display:grid;grid-template-columns:repeat(4,1fr);gap:13px;margin-bottom:20px}
+.qc{background:white;border-radius:13px;padding:17px;cursor:pointer;border:1px solid #eee;transition:all 0.15s}
+.qc:hover{transform:translateY(-2px);box-shadow:0 6px 18px rgba(0,0,0,0.07)}
+.qi{width:44px;height:44px;border-radius:13px;display:flex;align-items:center;justify-content:center;font-size:20px;margin-bottom:11px}
+.qc h4{font-size:12px;font-weight:700;color:#111;margin-bottom:3px}
+.qc p{font-size:11px;color:#888;line-height:1.4}
+.ic-blue{background:#3b82f6}.ic-green{background:#10b981}.ic-purple{background:#8b5cf6}
+.ic-orange{background:#f97316}.ic-teal{background:#06b6d4}.ic-pink{background:#ec4899}
+.ic-red{background:#ef4444}.ic-em{background:#059669}.ic-am{background:#f59e0b}.ic-in{background:#6366f1}
+.tbl{width:100%;border-collapse:collapse;font-size:12px}
+.tbl th{background:#fafafa;padding:8px 12px;text-align:left;color:#555;font-weight:600;border-bottom:1px solid #eee;font-size:11px;white-space:nowrap}
+.tbl td{padding:9px 12px;border-bottom:1px solid #f5f5f5;color:#333;vertical-align:middle}
+.tbl tr:last-child td{border-bottom:none}
+.tbl tr:hover td{background:#fafcff}
+.tbl-wrap{overflow-x:auto}
+.btn{padding:6px 13px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;border:none;font-family:inherit;transition:all 0.1s;display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
+.btn-pink{background:#e91e8c;color:white}.btn-pink:hover{background:#d0177e}
+.btn-green{background:#10b981;color:white}.btn-green:hover{background:#059669}
+.btn-red{background:#ef4444;color:white}.btn-red:hover{background:#dc2626}
+.btn-blue{background:#3b82f6;color:white}.btn-blue:hover{background:#2563eb}
+.btn-gray{background:#f0f0f0;color:#555}.btn-gray:hover{background:#e5e5e5}
+.btn-outline{background:white;border:1px solid #ddd;color:#444}.btn-outline:hover{border-color:#e91e8c;color:#e91e8c}
+.btn-sm{padding:5px 10px;font-size:11px;border-radius:7px}
+.btn-xs{padding:3px 8px;font-size:10px;border-radius:6px}
+.btn:disabled{opacity:0.6;cursor:not-allowed}
+.badge{display:inline-flex;align-items:center;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:600}
+.b-S{background:#fef3c7;color:#92400e}.b-A{background:#dbeafe;color:#1e40af}
+.b-B{background:#d1fae5;color:#065f46}.b-C{background:#ffedd5;color:#9a3412}
+.b-D{background:#fee2e2;color:#991b1b}.b-none{background:#f3f4f6;color:#9ca3af}
+.b-green{background:#d1fae5;color:#065f46}.b-blue{background:#dbeafe;color:#1e40af}
+.b-gray{background:#f3f4f6;color:#6b7280}.b-pink{background:#fce7f3;color:#9d174d}
+.b-orange{background:#ffedd5;color:#9a3412}.b-red{background:#fee2e2;color:#991b1b}
+.b-large{background:#dbeafe;color:#1e40af}.b-small{background:#f3f4f6;color:#374151}
+.gbrow{display:flex;gap:3px}
+.gbtn{width:30px;height:30px;border-radius:7px;border:1.5px solid #ddd;background:white;font-weight:700;font-size:11px;cursor:pointer;font-family:inherit;transition:all 0.1s;color:#ccc;padding:0}
+.gbtn:hover{border-color:#aaa;color:#333}
+.gbtn.gS{background:#fef3c7;border-color:#f59e0b;color:#92400e}
+.gbtn.gA{background:#dbeafe;border-color:#3b82f6;color:#1e40af}
+.gbtn.gB{background:#d1fae5;border-color:#10b981;color:#065f46}
+.gbtn.gC{background:#ffedd5;border-color:#f97316;color:#9a3412}
+.gbtn.gD{background:#fee2e2;border-color:#ef4444;color:#991b1b}
+.mbg{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:7777;align-items:center;justify-content:center}
+.mbg.open{display:flex}
+.mbox{background:white;border-radius:15px;padding:24px;min-width:480px;max-width:90vw;max-height:86vh;overflow-y:auto;box-shadow:0 20px 50px rgba(0,0,0,0.18)}
+.mtitle{font-size:16px;font-weight:700;margin-bottom:16px;color:#111}
+.mfoot{display:flex;gap:8px;justify-content:flex-end;margin-top:18px;padding-top:12px;border-top:1px solid #f0f0f0}
+.fg{margin-bottom:11px}
+.fl{font-size:11px;font-weight:600;color:#555;margin-bottom:4px;display:block}
+.fi,.fs,.fta{width:100%;padding:8px 10px;border:1px solid #ddd;border-radius:7px;font-family:inherit;font-size:12px;color:#333}
+.fi:focus,.fs:focus,.fta:focus{outline:none;border-color:#e91e8c}
+.fta{min-height:70px;resize:vertical;line-height:1.5}
+.frow{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.av{width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0}
+.av-pk{background:#fce7f3;color:#9d174d}.av-bl{background:#dbeafe;color:#1d4ed8}.av-gn{background:#d1fae5;color:#065f46}
+.prog-track{height:6px;background:#f0f0f0;border-radius:3px;overflow:hidden;margin-top:5px}
+.prog-fill{height:100%;border-radius:3px;background:#e91e8c;transition:width 0.3s}
+.pG{background:#10b981}.pY{background:#f59e0b}.pR{background:#ef4444}
+.tabrow{display:flex;gap:3px;background:#f5f5f5;border-radius:9px;padding:3px;width:fit-content}
+.tabbt{padding:6px 15px;border-radius:7px;font-size:12px;font-weight:500;cursor:pointer;background:none;border:none;color:#666;font-family:inherit;transition:all 0.15s}
+.tabbt.active{background:white;color:#e91e8c;font-weight:700;box-shadow:0 1px 3px rgba(0,0,0,0.08)}
+.info-tbl{width:100%;font-size:12px}
+.info-tbl td{padding:8px 4px;border-bottom:1px solid #f5f5f5}
+.info-tbl tr:last-child td{border-bottom:none}
+.info-tbl td:first-child{color:#888;width:70px}
+.info-tbl td:last-child{font-weight:600;text-align:right}
+.rbox{width:26px;height:26px;border-radius:7px;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700}
+.rk1{background:#fef3c7;color:#92400e}.rk2{background:#e5e7eb;color:#374151}
+.rk3{background:#ffedd5;color:#9a3412}.rkn{background:#f9fafb;color:#9ca3af}
+.own-row td{background:#fef3c7 !important}
+.own-row{border-left:3px solid #f59e0b}
+.wbar{display:flex;align-items:center;gap:7px;font-size:11px}
+.wtrack{flex:1;height:4px;background:#f0f0f0;border-radius:2px;overflow:hidden}
+.wfill{height:100%;background:#e91e8c;border-radius:2px}
+.empty{text-align:center;padding:40px;color:#aaa;font-size:13px}
+.ded-box{background:#fee2e2;border:1px solid #fca5a5;border-radius:8px;padding:9px 12px;font-size:11px;color:#991b1b;margin-top:6px}
+.ded-box strong{display:block;margin-bottom:3px;font-size:12px}
+.flow{display:flex;align-items:center;gap:6px;padding:10px 14px;background:white;border-radius:9px;border:1px solid #eee;margin-bottom:14px;font-size:11px;flex-wrap:wrap}
+.fstep{display:flex;align-items:center;gap:4px;color:#bbb}
+.fstep.done{color:#10b981}.fstep.cur{color:#e91e8c;font-weight:700}.fstep .dot{width:18px;height:18px;border-radius:50%;border:2px solid currentColor;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700}
+.farr{color:#ddd;font-size:12px}
+#toast{position:fixed;top:16px;right:16px;z-index:9999;display:flex;flex-direction:column;gap:6px;pointer-events:none}
+.tst{background:white;border-radius:9px;padding:10px 15px;box-shadow:0 4px 16px rgba(0,0,0,0.1);display:flex;align-items:center;gap:8px;font-size:12px;animation:slin 0.3s;border-left:3px solid #10b981;min-width:220px}
+.tst.err{border-left-color:#ef4444}.tst.inf{border-left-color:#3b82f6}.tst.wrn{border-left-color:#f59e0b}
+@keyframes slin{from{transform:translateX(110%);opacity:0}to{transform:translateX(0);opacity:1}}
+.qg3{display:grid;grid-template-columns:repeat(3,1fr);gap:13px;margin-bottom:20px}
+.qg2{display:grid;grid-template-columns:repeat(2,1fr);gap:13px;margin-bottom:20px}
+.perf-kpi{border:1px solid #eee;border-radius:10px;padding:14px;margin-bottom:10px;background:white}
+.perf-kpi-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px}
+.perf-kpi-title{font-size:13px;font-weight:700;color:#111}
+.perf-kpi-meta{font-size:11px;color:#888}
+.safety-input{background:#fff3cd;border:1px solid #ffc107;border-radius:8px;padding:12px 14px;margin-top:12px}
+.safety-input h4{font-size:12px;font-weight:700;color:#664d03;margin-bottom:8px}
+.safety-row{display:flex;align-items:center;gap:10px;margin-bottom:6px;font-size:12px}
+.safety-row:last-child{margin-bottom:0}
+.safety-row label{color:#555;min-width:140px}
+.safety-num{width:70px;padding:5px 8px;border:1px solid #ddd;border-radius:6px;font-family:inherit;font-size:12px;text-align:center}
+.deduct-preview{font-size:11px;color:#ef4444;font-weight:600;margin-left:6px}
+</style>
+</head>
+<body>
+
+<div id="loadingScreen">
+  <div class="ld-logo">S&amp;I</div>
+  <div class="ld-text">서울6본부 평가 시스템</div>
+  <div class="spinner"></div>
+</div>
+
+<div id="loginScreen">
+  <div class="lcard">
+    <div class="llogo">
+      <div class="llogo-box">S&amp;I</div>
+      <div class="llogo-txt">서울6본부<small>OKR 평가 시스템</small></div>
+    </div>
+    <div class="ltitle">로그인</div>
+    <div class="lsub">직책에 따라 메뉴 권한이 다르게 적용됩니다</div>
+    <div class="lerr" id="loginErr">이메일 또는 비밀번호가 올바르지 않습니다.</div>
+    <div class="lfg"><label class="lfl">이메일</label><input class="lfi" id="loginEmail" type="email" placeholder="이메일 입력" autocomplete="email"></div>
+    <div class="lfg"><label class="lfl">비밀번호</label><input class="lfi" id="loginPw" type="password" placeholder="비밀번호 입력" onkeydown="if(event.key==='Enter')doLogin()"></div>
+    <button class="lbtn" id="loginBtn" onclick="doLogin()">로그인</button>
+    <div class="ldemo">
+      <strong>🔑 테스트 계정 — 클릭하면 자동 입력됩니다</strong>
+      <div class="ldemo-row">
+        <div class="ldemo-acc" onclick="fillLogin('admin@sni.co.kr','admin1234')">
+          <div class="role">본부장</div><div class="nm">송덕수</div><div class="em">admin@sni.co.kr</div>
+        </div>
+        <div class="ldemo-acc" onclick="fillLogin('jdh@sni.co.kr','center1234')">
+          <div class="role">센터장</div><div class="nm">진대현</div><div class="em">jdh@sni.co.kr</div>
+        </div>
+        <div class="ldemo-acc" onclick="fillLogin('kms@sni.co.kr','staff1234')">
+          <div class="role">센터원</div><div class="nm">김민수</div><div class="em">kms@sni.co.kr</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="app">
+  <nav class="sb">
+    <div class="sb-brand">
+      <div class="brow">
+        <div class="blog">S&amp;I</div>
+        <div class="btxt">서울6본부<small>평가 시스템</small></div>
+      </div>
+      <div class="urole" id="sbRole">—</div>
+      <div class="uname" id="sbName">—</div>
+      <div class="uorg" id="sbOrg">—</div>
+    </div>
+    <div class="sbnav" id="sbNav"></div>
+    <div class="sbfoot">
+      <button class="logbtn" onclick="doLogout()">🚪 로그아웃</button>
+    </div>
+  </nav>
+  <div class="mw">
+    <div class="topbar">
+      <div class="tb-l"><div class="tb-dot"></div><span id="tbEmail">—</span></div>
+      <div style="font-size:11px;color:#aaa">2025년 하반기</div>
+    </div>
+    <div class="content" id="content"></div>
+  </div>
+</div>
+
+<div class="mbg" id="modalBg" onclick="if(event.target===this)closeModal()">
+  <div class="mbox" id="modalBox"></div>
+</div>
+<div id="toast"></div>
+
+<script>
+// ══════════════════════════════════════════
+//  SUPABASE (설정 전 데모 모드로 동작)
+// ══════════════════════════════════════════
+//const SUPABASE_URL  = 'https://wdbndirmgzvcshoioqet.supabase.co';   // ← 교체
+//const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndkYm5kaXJtZ3p2Y3Nob2lvcWV0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMzE2NzUsImV4cCI6MjA5MTYwNzY3NX0.HuWhoBPhcHZmGS2wFu8vWA402hu3n-OCA0KYVxC9CAQ';                  // ← 교체
+
+const SUPABASE_URL  = 'https://YOUR_PROJECT_ID.supabase.co';
+const SUPABASE_ANON = 'YOUR_ANON_PUBLIC_KEY';
+const DEMO_MODE = SUPABASE_URL.includes('YOUR_PROJECT_ID');
+let dbClient = DEMO_MODE ? null : window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+
+// ══════════════════════════════════════════
+//  DEMO USERS (role: admin|manager|staff)
+// ══════════════════════════════════════════
+const DEMO_USERS = {
+  'admin@sni.co.kr':  {pw:'admin1234',  name:'송덕수', role:'admin',   centerId:null, staffId:null, org:'서울6지역본부', title:'본부장', joinDate:'2024-01-01'},
+  'jdh@sni.co.kr':   {pw:'center1234', name:'진대현', role:'manager', centerId:16,   staffId:null, org:'서울6본부BS센터', title:'센터장', managerId:16, joinDate:'2024-05-01'},
+  'kms@sni.co.kr':   {pw:'staff1234',  name:'김민수', role:'staff',   centerId:1,    staffId:1,    org:'GS타워운영센터', title:'센터원', joinDate:'2024-03-01'},
+};
+
+// ══════════════════════════════════════════
+//  NAV CONFIGS PER ROLE
+// ══════════════════════════════════════════
+const NAV = {
+  admin: [
+    {id:'dashboard',icon:'🏠',label:'대시보드'},
+    {id:'mgr-approval',icon:'👤',label:'센터장 승인'},
+    {id:'mgr-kpi',icon:'🎯',label:'센터장 평가지표'},
+    {id:'mgr-perf',icon:'🏆',label:'센터장 실적 현황'},
+    {id:'staff-kpi',icon:'📋',label:'센터원 평가지표'},
+    {id:'submissions',icon:'👁',label:'실적 제출 현황'},
+    {id:'review',icon:'📝',label:'실적 검토'},
+    {id:'staff-rank',icon:'📊',label:'센터원 순위 조회'},
+    {id:'finalize',icon:'✅',label:'분기 완료 처리'},
+    {id:'centers',icon:'🏢',label:'센터 관리'},
+  ],
+  manager: [
+    {id:'dashboard',icon:'🏠',label:'대시보드'},
+    {id:'staff-approval',icon:'👤',label:'센터원 승인'},
+    {id:'staff-manage',icon:'👥',label:'센터원 관리'},
+    {id:'agreement',icon:'🤝',label:'합의 관리'},
+    {id:'perf-status',icon:'👁',label:'실적 제출 현황'},
+    {id:'staff-review',icon:'📝',label:'실적 검토'},
+    {id:'staff-eval',icon:'📋',label:'센터원 평가'},
+    {id:'my-eval',icon:'🎯',label:'내 센터장 평가'},
+    {id:'center-rank',icon:'📊',label:'센터원 순위 조회'},
+  ],
+  staff: [
+    {id:'dashboard',icon:'🏠',label:'대시보드'},
+    {id:'my-submit',icon:'📋',label:'실적 제출'},
+    {id:'my-rank',icon:'📊',label:'내 순위'},
+  ]
+};
+
+// ══════════════════════════════════════════
+//  STATE
+// ══════════════════════════════════════════
+const S = {
+  page:'dashboard', tab:{}, user:null,
+  centers:[], managers:[], staff:[], mgrKPIs:[], staffKPIs:[],
+  mgrEvals:{},     // 'mgr_ID' → {kpi_N: 'S'|'A'|...}
+  staffEvals:{},   // 'stf_ID' → {kpi_N: grade}
+  safetyData:{},   // 'mgr_ID' | 'stf_ID' → {ruleVio:0, ltiCount:0}
+  performances:{}, // staffId → {kpiN:{content,evidence}, status, note, submittedAt}
+  agreements:{},   // staffId → {status:'pending'|'approved'|'rejected', note, date, managerId}
+  reviews:{},      // managerId → {status:'pending'|'confirmed'|'returned', note, date}
+  pendingStaff:[],
+};
+
+// ══════════════════════════════════════════
+//  SEED DATA
+// ══════════════════════════════════════════
+const SEED = {
+  centers:[
+    {id:1,name:'GS타워운영센터',scale:'large',type:'direct'},
+    {id:2,name:'전자서초R&D운영센터',scale:'large',type:'direct'},
+    {id:3,name:'전자양재R&D캠퍼스운영센터',scale:'small',type:'direct'},
+    {id:4,name:'LF동관운영센터',scale:'small',type:'direct'},
+    {id:5,name:'세스코터치운영센터',scale:'small',type:'direct'},
+    {id:6,name:'대신위례운영센터',scale:'small',type:'direct'},
+    {id:7,name:'신한카드역삼운영센터',scale:'small',type:'direct'},
+    {id:8,name:'신라교역고덕사옥운영센터',scale:'small',type:'direct'},
+    {id:9,name:'343빌딩운영센터',scale:'small',type:'direct'},
+    {id:10,name:'한석타워운영센터',scale:'small',type:'direct'},
+    {id:11,name:'에너지플러스허브내곡운영센터',scale:'small',type:'direct'},
+    {id:12,name:'이스트폴운영센터',scale:'large',type:'direct'},
+    {id:13,name:'CJ건설방배운영센터',scale:'small',type:'direct'},
+    {id:14,name:'전자SKS서울운영센터',scale:'small',type:'direct'},
+    {id:15,name:'양재AI캠퍼스운영센터',scale:'small',type:'direct'},
+    {id:16,name:'서울6본부BS센터',scale:'small',type:'direct'},
+    {id:17,name:'메리츠KAM',scale:'large',type:'kam'},
+    {id:18,name:'메리츠타워운영센터',scale:'large',type:'kam'},
+    {id:19,name:'강북메리츠타워운영센터',scale:'large',type:'kam'},
+    {id:20,name:'부산메리츠타워운영센터',scale:'large',type:'kam'},
+  ],
+  managers:[
+    {id:1,name:'이도윤',centerId:1,status:'approved',email:'idy@sni.co.kr',joinDate:'2024-01-15'},
+    {id:2,name:'김금철',centerId:2,status:'approved',email:'kkc@sni.co.kr',joinDate:'2024-01-15'},
+    {id:3,name:'홍석기',centerId:12,status:'approved',email:'hsk@sni.co.kr',joinDate:'2024-04-01'},
+    {id:4,name:'문준영',centerId:3,status:'approved',email:'mjy@sni.co.kr',joinDate:'2024-02-01'},
+    {id:5,name:'이기용',centerId:4,status:'approved',email:'lky@sni.co.kr',joinDate:'2024-02-01'},
+    {id:6,name:'조호빈',centerId:5,status:'approved',email:'jhb@sni.co.kr',joinDate:'2024-02-01'},
+    {id:7,name:'서현석',centerId:7,status:'approved',email:'shs@sni.co.kr',joinDate:'2024-03-01'},
+    {id:8,name:'이재양',centerId:8,status:'approved',email:'ljy@sni.co.kr',joinDate:'2024-03-01'},
+    {id:9,name:'권형호',centerId:13,status:'approved',email:'khh@sni.co.kr',joinDate:'2024-04-01'},
+    {id:10,name:'윤홍기',centerId:18,status:'approved',email:'yhg@sni.co.kr',joinDate:'2024-05-01'},
+    {id:16,name:'진대현',centerId:16,status:'approved',email:'jdh@sni.co.kr',joinDate:'2024-05-01'},
+    {id:17,name:'이흥기',centerId:17,status:'approved',email:'lhg@sni.co.kr',joinDate:'2024-05-01'},
+    {id:18,name:'홍원기',centerId:19,status:'pending',email:'hwg@sni.co.kr',joinDate:'2025-01-10'},
+    {id:19,name:'강석준',centerId:20,status:'pending',email:'ksj@sni.co.kr',joinDate:'2025-01-15'},
+  ],
+  staff:[
+    {id:1,name:'김민수',centerId:1,email:'kms@sni.co.kr',joinDate:'2024-03-01',status:'approved'},
+    {id:2,name:'이수진',centerId:1,email:'lsj@sni.co.kr',joinDate:'2024-04-01',status:'approved'},
+    {id:3,name:'박재현',centerId:2,email:'pjh@sni.co.kr',joinDate:'2024-03-15',status:'approved'},
+    {id:4,name:'최윤아',centerId:3,email:'cya@sni.co.kr',joinDate:'2024-05-01',status:'approved'},
+    {id:5,name:'정다은',centerId:4,email:'jde@sni.co.kr',joinDate:'2024-05-01',status:'approved'},
+    {id:6,name:'한지원',centerId:12,email:'hjw@sni.co.kr',joinDate:'2024-06-01',status:'approved'},
+    {id:7,name:'오준혁',centerId:12,email:'ojh@sni.co.kr',joinDate:'2024-06-01',status:'approved'},
+    {id:8,name:'신혜원',centerId:16,email:'shw@sni.co.kr',joinDate:'2024-07-01',status:'pending'},
+    {id:9,name:'구경서',centerId:16,email:'kooks@sni.co.kr',joinDate:'2026-02-11',status:'approved'},
+  ],
+  mgrKPIs:[
+    {id:1,obj:'손익관리',name:'매출 달성률',weight:30,criteria:'S: 대형 110%↑/중소형 115%↑\nA: 대형 105%↑/중소형 110%↑\nB: 대형 100%↑/중소형 105%↑\nC/D: 미달',note:'사업계획 매출 기준'},
+    {id:2,obj:'손익관리',name:'매출총이익 달성률',weight:40,criteria:'S: 대형 110%↑/중소형 115%↑\nA: 대형 105%↑/중소형 110%↑\nB: 대형 100%↑/중소형 105%↑\nC/D: 미달',note:'사업계획 매총1 기준'},
+    {id:3,obj:'안전관리',name:'안전사고 ZERO달성',weight:20,criteria:'LTI 건수, LTIFR, 일반사고 건수 종합\n규정위반 건당 -2점, LTI 건당 -5점 감점',note:'위반 시 자동 감점 적용'},
+    {id:4,obj:'중점추진과제',name:'중점추진과제 달성',weight:10,criteria:'S: 100% 달성\nB: 90%↑ 달성\nD: 90% 미만',note:'고객만족도·엣지지표·조직문화'},
+  ],
+  staffKPIs:[
+    {id:1,obj:'재무적 기여',name:'재무 기여 건수',weight:25,criteria:'계획 외/관리범위 외 기여 건수 기준',note:''},
+    {id:2,obj:'업무누락 ZERO',name:'업무누락 및 엣지 이행율',weight:15,criteria:'보고누락/법정점검/규정 위반 0건\n엣지 이행율 100%',note:''},
+    {id:3,obj:'안전관리',name:'사업장 안전 이행율',weight:5,criteria:'안전사고 ZERO 이행율\n규정위반 건당 -2점, LTI 건당 -5점',note:'위반 시 자동 감점'},
+    {id:4,obj:'안전관리',name:'안전 가점항목',weight:10,criteria:'LTI건수=0\n안전보건우수사례/대외수상',note:''},
+    {id:5,obj:'업무/프로세스 개선',name:'업무 개선 활동',weight:15,criteria:'업무/프로세스 개선\n고객사 제안/수선공사 추가 제안',note:''},
+    {id:6,obj:'고객 대응 협조',name:'고객 만족 활동',weight:10,criteria:'고객 칭찬\n고객 Pain Point 개선\nESG 기여',note:''},
+    {id:7,obj:'지시사항 이행',name:'지시사항 이행율',weight:10,criteria:'업무계획 외 지시사항 이행\n중점추진과제 이행',note:''},
+    {id:8,obj:'연차/근태',name:'연차 소진 및 근태',weight:5,criteria:'연차 소진율 90%↑\n지각/업무이탈/무단결근 ZERO',note:''},
+    {id:9,obj:'협업 기여',name:'협업 활동',weight:5,criteria:'타 현장 및 본부/본사 업무 지원',note:''},
+  ],
+};
+
+// ══════════════════════════════════════════
+//  HELPERS
+// ══════════════════════════════════════════
+const g = id => document.getElementById(id);
+const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const GS = {S:5,A:4,B:3,C:2,D:1};
+const GC = {S:'#f59e0b',A:'#3b82f6',B:'#10b981',C:'#f97316',D:'#ef4444'};
+
+function calcScore(evObj, kpis, safetyKey) {
+  let ws=0, wt=0;
+  kpis.forEach(k=>{
+    const gr=evObj?.['kpi_'+k.id];
+    if(gr){ws+=GS[gr]*(k.weight/100);wt+=k.weight/100;}
+  });
+  if(!wt) return null;
+  let score = Math.round((ws/5)*100);
+  if(safetyKey && S.safetyData[safetyKey]){
+    const sd=S.safetyData[safetyKey];
+    const ded=(sd.ruleVio||0)*2+(sd.ltiCount||0)*5;
+    score=Math.max(0,score-ded);
+  }
+  return score;
+}
+function getGrade(score){ if(score===null)return null; if(score>=90)return'S'; if(score>=75)return'A'; if(score>=60)return'B'; if(score>=45)return'C'; return'D'; }
+function getCenterName(id){ return S.centers.find(c=>c.id===id)?.name||'-'; }
+function getCenter(id){ return S.centers.find(c=>c.id===id); }
+function deductInfo(key){ const sd=S.safetyData[key]; if(!sd||(sd.ruleVio===0&&sd.ltiCount===0)) return null; return `규정위반 ${sd.ruleVio}건(-${sd.ruleVio*2}점) + LTI ${sd.ltiCount}건(-${sd.ltiCount*5}점) = 총 -${sd.ruleVio*2+sd.ltiCount*5}점 감점`; }
+
+function toast(msg, type='success'){
+  const ic={success:'✅',error:'❌',info:'ℹ️',warn:'⚠️'}[type]||'✅';
+  const el=document.createElement('div'); el.className='tst '+(type==='error'?'err':type==='info'?'inf':type==='warn'?'wrn':'');
+  el.innerHTML=`<span style="font-size:14px">${ic}</span><span>${esc(msg)}</span>`;
+  g('toast').appendChild(el);
+  setTimeout(()=>{el.style.opacity='0';el.style.transition='opacity 0.3s';setTimeout(()=>el.remove(),300)},3000);
+}
+
+function showModal(html){ g('modalBox').innerHTML=html; g('modalBg').classList.add('open'); }
+function closeModal(){ g('modalBg').classList.remove('open'); }
+
+// ══════════════════════════════════════════
+//  AUTH
+// ══════════════════════════════════════════
+function fillLogin(email, pw){ g('loginEmail').value=email; g('loginPw').value=pw; }
+
+function doLogin(){
+  const email=g('loginEmail').value.trim(), pw=g('loginPw').value.trim();
+  const err=g('loginErr'), btn=g('loginBtn');
+  err.classList.remove('show');
+  if(!email||!pw){err.textContent='이메일과 비밀번호를 입력하세요';err.classList.add('show');return;}
+  btn.disabled=true; btn.textContent='로그인 중...';
+  if(DEMO_MODE){
+    const u=DEMO_USERS[email];
+    if(u&&u.pw===pw){
+      S.user={email,...u};
+      initDemoData(); showApp();
+    } else {
+      err.textContent='이메일 또는 비밀번호가 올바르지 않습니다'; err.classList.add('show');
+    }
+    btn.disabled=false; btn.textContent='로그인';
+  }
+}
+
+function doLogout(){
+  if(!confirm('로그아웃 하시겠습니까?')) return;
+  S.user=null;
+  g('app').classList.remove('show');
+  g('loginScreen').classList.add('show');
+  toast('로그아웃 되었습니다','info');
+}
+
+function initDemoData(){
+  S.centers   = SEED.centers.map(c=>({...c}));
+  S.managers  = SEED.managers.map(m=>({...m}));
+  S.staff     = SEED.staff.map(s=>({...s}));
+  S.mgrKPIs   = SEED.mgrKPIs.map(k=>({...k}));
+  S.staffKPIs = SEED.staffKPIs.map(k=>({...k}));
+
+  // ── 10개 테스트 평가 ──────────────────────────────────────
+  // 센터장 평가 (본부장이 입력한 grades)
+  // weights: kpi1=30%, kpi2=40%, kpi3=20%, kpi4=10%
+  // 테스트1: 이도윤(id1) S,S,A,S → 5*0.3+5*0.4+4*0.2+5*0.1=4.8 → 96점 S
+  S.mgrEvals['mgr_1']={kpi_1:'S',kpi_2:'S',kpi_3:'A',kpi_4:'S'};
+  // 테스트2: 김금철(id2) A,A,B,A → 3.8 → 76점 A
+  S.mgrEvals['mgr_2']={kpi_1:'A',kpi_2:'A',kpi_3:'B',kpi_4:'A'};
+  // 테스트3: 홍석기(id3) B,B,A,B → 3.2 → 64점 B
+  S.mgrEvals['mgr_3']={kpi_1:'B',kpi_2:'B',kpi_3:'A',kpi_4:'B'};
+  // 테스트4: 문준영(id4) A,S,B,A → 4.2 → 84점 A
+  S.mgrEvals['mgr_4']={kpi_1:'A',kpi_2:'S',kpi_3:'B',kpi_4:'A'};
+  // 테스트5: 이기용(id5) B,B,B,B → 3.0 → 60점 B
+  S.mgrEvals['mgr_5']={kpi_1:'B',kpi_2:'B',kpi_3:'B',kpi_4:'B'};
+  // 테스트6: 조호빈(id6) B,A,C,B → 0.9+1.6+0.4+0.3=3.2 → 64점 B
+  S.mgrEvals['mgr_6']={kpi_1:'B',kpi_2:'A',kpi_3:'C',kpi_4:'B'};
+  // 테스트7: 서현석(id7) A,A,B,A → 76점 - 규정위반3건(-6) = 70점 B ★감점테스트
+  S.mgrEvals['mgr_7']={kpi_1:'A',kpi_2:'A',kpi_3:'B',kpi_4:'A'};
+  S.safetyData['mgr_7']={ruleVio:3,ltiCount:0};
+  // 테스트8: 이재양(id8) B,B,A,B → 64점 - LTI2건(-10) = 54점 C ★감점테스트
+  S.mgrEvals['mgr_8']={kpi_1:'B',kpi_2:'B',kpi_3:'A',kpi_4:'B'};
+  S.safetyData['mgr_8']={ruleVio:0,ltiCount:2};
+  // 테스트9: 권형호(id9) A,S,B,A → 84점 A
+  S.mgrEvals['mgr_9']={kpi_1:'A',kpi_2:'S',kpi_3:'B',kpi_4:'A'};
+  // 테스트10: 윤홍기(id10) B,A,A,B → 0.9+1.6+0.8+0.3=3.6 → 72점 - 규정위반1(-2)+LTI1(-5) = 65점 B ★감점테스트
+  S.mgrEvals['mgr_10']={kpi_1:'B',kpi_2:'A',kpi_3:'A',kpi_4:'B'};
+  S.safetyData['mgr_10']={ruleVio:1,ltiCount:1};
+
+  // 센터원 샘플 평가 (센터장이 입력)
+  S.staffEvals['stf_1']={kpi_1:'A',kpi_2:'B',kpi_3:'S',kpi_4:'A',kpi_5:'B',kpi_6:'A',kpi_7:'B',kpi_8:'S',kpi_9:'A'};
+  S.staffEvals['stf_2']={kpi_1:'B',kpi_2:'A',kpi_3:'A',kpi_4:'B',kpi_5:'A',kpi_6:'B',kpi_7:'A',kpi_8:'A',kpi_9:'B'};
+  S.staffEvals['stf_3']={kpi_1:'S',kpi_2:'A',kpi_3:'B',kpi_4:'S',kpi_5:'A',kpi_6:'A',kpi_7:'S',kpi_8:'A',kpi_9:'A'};
+  S.staffEvals['stf_4']={kpi_1:'B',kpi_2:'B',kpi_3:'B',kpi_4:'A',kpi_5:'B',kpi_6:'B',kpi_7:'A',kpi_8:'B',kpi_9:'B'};
+  S.staffEvals['stf_5']={kpi_1:'C',kpi_2:'B',kpi_3:'B',kpi_4:'B',kpi_5:'C',kpi_6:'B',kpi_7:'B',kpi_8:'A',kpi_9:'B'};
+  S.staffEvals['stf_6']={kpi_1:'A',kpi_2:'A',kpi_3:'A',kpi_4:'A',kpi_5:'S',kpi_6:'A',kpi_7:'A',kpi_8:'B',kpi_9:'S'};
+  S.staffEvals['stf_7']={kpi_1:'B',kpi_2:'C',kpi_3:'B',kpi_4:'B',kpi_5:'B',kpi_6:'C',kpi_7:'B',kpi_8:'B',kpi_9:'B'};
+
+  // 샘플 실적 제출 (센터원이 제출한 데이터)
+  S.performances[1]={
+    kpiData:{1:{content:'GS타워 고객사 추가 용역 2건 수주 (7천만원)',evidence:'계약서 사본'},2:{content:'보고누락 0건 달성',evidence:'업무일지'},3:{content:'LTI 0건 달성',evidence:'안전일지'}},
+    status:'agreed', submittedAt:'2025-07-15', note:''
+  };
+  S.agreements[1]={status:'approved',note:'우수한 실적 확인',date:'2025-07-18',managerId:16};
+  S.reviews[1]={status:'confirmed',note:'이상 없음',date:'2025-07-20'};
+
+  try{
+    const saved=localStorage.getItem('okr_v3');
+    if(saved){const p=JSON.parse(saved);if(p.mgrEvals)Object.assign(S.mgrEvals,p.mgrEvals);if(p.staffEvals)Object.assign(S.staffEvals,p.staffEvals);if(p.safetyData)Object.assign(S.safetyData,p.safetyData);if(p.performances)Object.assign(S.performances,p.performances);if(p.agreements)Object.assign(S.agreements,p.agreements);if(p.reviews)Object.assign(S.reviews,p.reviews);}
+  }catch(e){}
+}
+function saveLocal(){ try{localStorage.setItem('okr_v3',JSON.stringify({mgrEvals:S.mgrEvals,staffEvals:S.staffEvals,safetyData:S.safetyData,performances:S.performances,agreements:S.agreements,reviews:S.reviews}));}catch(e){} }
+
+function showApp(){
+  g('loadingScreen').classList.add('hide');
+  g('loginScreen').classList.remove('show');
+  g('app').classList.add('show');
+  g('sbRole').textContent=S.user.title||'—';
+  g('sbName').textContent=S.user.name||'—';
+  g('sbOrg').textContent=S.user.org||'—';
+  g('tbEmail').textContent=S.user.email||'—';
+  buildNav(); render();
+}
+
+function buildNav(){
+  const navItems=NAV[S.user.role]||[];
+  g('sbNav').innerHTML=navItems.map(n=>`<div class="ni${S.page===n.id?' active':''}" data-p="${n.id}" onclick="go('${n.id}')"><span class="nicon">${n.icon}</span>${esc(n.label)}</div>`).join('');
+}
+
+function go(page){
+  S.page=page;
+  document.querySelectorAll('.ni').forEach(el=>el.classList.toggle('active',el.dataset.p===page));
+  render();
+}
+
+// ══════════════════════════════════════════
+//  RENDER DISPATCHER
+// ══════════════════════════════════════════
+function render(){
+  const pagesAdmin={dashboard:pgAdminDashboard,'mgr-approval':pgMgrApproval,'mgr-kpi':pgMgrKPI,'mgr-perf':pgMgrPerf,'staff-kpi':pgStaffKPI,submissions:pgAdminSubmissions,review:pgAdminReview,'staff-rank':pgAdminRanking,finalize:pgFinalize,centers:pgCenters};
+  const pagesMgr={dashboard:pgMgrDashboard,'staff-approval':pgStaffApproval,'staff-manage':pgStaffManage,agreement:pgAgreement,'perf-status':pgMgrPerfStatus,'staff-review':pgMgrReview,'staff-eval':pgStaffEval,'my-eval':pgMyEval,'center-rank':pgCenterRank};
+  const pagesStaff={dashboard:pgStaffDashboard,'my-submit':pgMySubmit,'my-rank':pgMyRank};
+  const map=S.user?.role==='admin'?pagesAdmin:S.user?.role==='manager'?pagesMgr:pagesStaff;
+  g('content').innerHTML=(map[S.page]||pgAdminDashboard)();
+}
+
+// ══════════════════════════════════════════
+//  GRADE BUTTONS HANDLER
+// ══════════════════════════════════════════
+function setGrade(ekey, kpiId, grade, btn){
+  const isStf=ekey.startsWith('stf_');
+  if(isStf){if(!S.staffEvals[ekey])S.staffEvals[ekey]={};S.staffEvals[ekey]['kpi_'+kpiId]=grade;}
+  else{if(!S.mgrEvals[ekey])S.mgrEvals[ekey]={};S.mgrEvals[ekey]['kpi_'+kpiId]=grade;}
+  btn.closest('.gbrow').querySelectorAll('.gbtn').forEach(b=>b.className='gbtn');
+  btn.className='gbtn g'+grade;
+  updateScoreDisplay(ekey, isStf?S.staffKPIs:S.mgrKPIs);
+  saveLocal();
+}
+function updateScoreDisplay(ekey, kpis){
+  const ev=ekey.startsWith('stf_')?S.staffEvals[ekey]:S.mgrEvals[ekey];
+  const score=calcScore(ev,kpis,ekey); const fg=getGrade(score);
+  const se=g('score_'+ekey),ge=g('grade_'+ekey),de=g('deduct_'+ekey);
+  if(se)se.textContent=score!==null?score+'점':'—';
+  if(ge){ge.textContent=fg||'—';ge.className='badge '+(fg?'b-'+fg:'b-none');}
+  if(de){const di=deductInfo(ekey);if(di){de.innerHTML=`<strong>⚠ 안전 감점 적용</strong>${esc(di)}`;de.style.display='block';}else{de.style.display='none';}}
+}
+
+// ══════════════════════════════════════════
+//  ① 본부장 PAGES
+// ══════════════════════════════════════════
+function pgAdminDashboard(){
+  const approved=S.managers.filter(m=>m.status==='approved').length;
+  const pending=S.managers.filter(m=>m.status==='pending').length;
+  const evalDone=Object.keys(S.mgrEvals).filter(k=>k.startsWith('mgr_')).length;
+  const subDone=Object.values(S.performances).filter(p=>p.status!=='draft').length;
+  return`<div class="ph"><div class="ptitle">환영합니다, ${esc(S.user.name)}님!</div>
+  <div class="psub">본부장 대시보드 · 센터장 승인, 평가지표 관리, 평가를 수행할 수 있습니다</div></div>
+  <div class="sg">
+    <div class="sc"><div class="sn">${S.centers.length}</div><div class="sl">총 센터 수</div><span class="stag" style="background:#dbeafe;color:#1e40af">직할/KAM</span></div>
+    <div class="sc"><div class="sn">${approved}</div><div class="sl">승인 센터장</div><span class="stag" style="background:#fef3c7;color:#92400e">대기 ${pending}명</span></div>
+    <div class="sc"><div class="sn">${evalDone}</div><div class="sl">평가 완료 (센터장)</div><span class="stag" style="background:#ffedd5;color:#9a3412">전체 ${approved}명 중</span></div>
+    <div class="sc"><div class="sn">${subDone}</div><div class="sl">실적 제출 완료</div><span class="stag" style="background:#d1fae5;color:#065f46">센터원 기준</span></div>
+  </div>
+  <div class="qg">
+    <div class="qc" onclick="go('mgr-approval')"><div class="qi ic-blue">👤</div><h4>센터장 승인</h4><p>가입 대기 중인 센터장 승인</p></div>
+    <div class="qc" onclick="go('staff-kpi')"><div class="qi ic-green">📋</div><h4>센터원 평가지표</h4><p>분기별 센터원 평가 지표 설정</p></div>
+    <div class="qc" onclick="go('mgr-kpi')"><div class="qi ic-purple">🎯</div><h4>센터장 평가지표</h4><p>연도별 센터장 평가 지표 설정</p></div>
+    <div class="qc" onclick="go('mgr-perf')"><div class="qi ic-orange">🏆</div><h4>센터장 실적 현황</h4><p>센터장 실적/달성률/순위 확인</p></div>
+    <div class="qc" onclick="go('submissions')"><div class="qi ic-teal">👁</div><h4>실적 제출 현황</h4><p>센터원 실적 제출 현황 확인</p></div>
+    <div class="qc" onclick="go('review')"><div class="qi ic-pink">📝</div><h4>실적 검토</h4><p>센터원 실적 최종 확인</p></div>
+    <div class="qc" onclick="go('staff-rank')"><div class="qi ic-red">📊</div><h4>센터원 순위 조회</h4><p>센터원 순위 및 점수 확인</p></div>
+    <div class="qc" onclick="go('finalize')"><div class="qi ic-em">✅</div><h4>분기 완료 처리</h4><p>분기 마감 및 데이터 정리</p></div>
+  </div>
+  <div class="card"><div class="sh"><div class="stit">내 정보</div></div>
+  <div style="padding:14px 16px"><table class="info-tbl">
+    <tr><td>이름</td><td>${esc(S.user.name)}</td></tr>
+    <tr><td>이메일</td><td>${esc(S.user.email)}</td></tr>
+    <tr><td>직책</td><td>${esc(S.user.title)}</td></tr>
+    <tr><td>소속</td><td>${esc(S.user.org)}</td></tr>
+    <tr><td>가입일</td><td>${S.user.joinDate}</td></tr>
+  </table></div></div>`;
+}
+
+function pgMgrApproval(){
+  const tab=S.tab.mgrApproval||'pending';
+  const pend=S.managers.filter(m=>m.status==='pending');
+  const appr=S.managers.filter(m=>m.status==='approved');
+  const list=tab==='pending'?pend:appr;
+  const rows=list.length?list.map(m=>{
+    const c=getCenter(m.centerId);
+    return`<tr><td><div style="display:flex;align-items:center;gap:8px"><div class="av av-pk">${m.name[0]}</div><div><div style="font-weight:600">${esc(m.name)}</div><div style="font-size:10px;color:#888">${esc(m.email)}</div></div></div></td>
+    <td style="font-size:11px">${esc(getCenterName(m.centerId))}</td>
+    <td><span class="badge ${c?.scale==='large'?'b-large':'b-small'}">${c?.scale==='large'?'대형':'중소형'}</span> <span class="badge ${c?.type==='kam'?'b-orange':'b-gray'}">${c?.type==='kam'?'KAM':'직할'}</span></td>
+    <td>${m.joinDate}</td>
+    <td>${tab==='pending'
+      ?`<button class="btn btn-green btn-xs" onclick="approveMgr(${m.id})">✓ 승인</button> <button class="btn btn-red btn-xs" onclick="rejectMgr(${m.id})">✕</button>`
+      :`<span class="badge b-green">✓ 승인</span> <button class="btn btn-outline btn-xs" onclick="revokeMgr(${m.id})" style="margin-left:5px">취소</button>`
+    }</td></tr>`;
+  }).join(''):`<tr><td colspan="5" class="empty">${tab==='pending'?'대기 중인 센터장이 없습니다':'—'}</td></tr>`;
+  return`<div class="ph"><div class="ptitle">센터장 승인</div><div class="psub">센터장 가입 신청을 검토하고 승인/거절합니다</div></div>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+    <div class="tabrow">
+      <button class="tabbt${tab==='pending'?' active':''}" onclick="S.tab.mgrApproval='pending';render()">대기 <span class="badge b-pink" style="margin-left:3px">${pend.length}</span></button>
+      <button class="tabbt${tab==='approved'?' active':''}" onclick="S.tab.mgrApproval='approved';render()">승인 완료 <span class="badge b-green" style="margin-left:3px">${appr.length}</span></button>
+    </div>
+    <button class="btn btn-pink btn-sm" onclick="modalAddMgr()">+ 센터장 추가</button>
+  </div>
+  <div class="card"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>이름</th><th>센터</th><th>규모/유형</th><th>신청일</th><th>처리</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+}
+function approveMgr(id){const m=S.managers.find(x=>x.id===id);if(m){m.status='approved';toast(m.name+' 센터장 승인');render();}}
+function rejectMgr(id){if(confirm('거절하시겠습니까?')){S.managers=S.managers.filter(x=>x.id!==id);toast('거절 처리','info');render();}}
+function revokeMgr(id){if(confirm('승인 취소하시겠습니까?')){const m=S.managers.find(x=>x.id===id);if(m){m.status='pending';render();}}}
+function modalAddMgr(){
+  const opts=S.centers.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('');
+  showModal(`<div class="mtitle">센터장 추가</div>
+  <div class="frow"><div class="fg"><label class="fl">이름 *</label><input class="fi" id="m_nm"></div><div class="fg"><label class="fl">이메일 *</label><input class="fi" id="m_em" type="email"></div></div>
+  <div class="fg"><label class="fl">소속 센터 *</label><select class="fs" id="m_cid">${opts}</select></div>
+  <div class="frow"><div class="fg"><label class="fl">신청일</label><input class="fi" id="m_dt" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+  <div class="fg"><label class="fl">상태</label><select class="fs" id="m_st"><option value="pending">대기</option><option value="approved">승인</option></select></div></div>
+  <div class="mfoot"><button class="btn btn-gray" onclick="closeModal()">취소</button><button class="btn btn-pink" onclick="saveMgr()">저장</button></div>`);
+}
+function saveMgr(){
+  const nm=g('m_nm')?.value?.trim(),em=g('m_em')?.value?.trim();
+  if(!nm||!em)return alert('이름과 이메일을 입력하세요');
+  S.managers.push({id:Date.now(),name:nm,centerId:parseInt(g('m_cid')?.value),email:em,joinDate:g('m_dt')?.value,status:g('m_st')?.value});
+  toast('추가되었습니다');closeModal();render();
+}
+
+function pgMgrKPI(){ return kpiMgmtPage('mgr','센터장','b-blue'); }
+function pgStaffKPI(){ return kpiMgmtPage('stf','센터원','b-pink'); }
+function kpiMgmtPage(type,label,bc){
+  const kpis=type==='mgr'?S.mgrKPIs:S.staffKPIs;
+  const total=kpis.reduce((a,k)=>a+k.weight,0);
+  const rows=kpis.map(k=>`<tr>
+    <td><span class="badge ${bc}">${esc(k.obj)}</span></td>
+    <td><div style="font-weight:600">${esc(k.name)}</div>${k.note?`<div style="font-size:10px;color:#888;margin-top:1px">${esc(k.note)}</div>`:''}</td>
+    <td style="max-width:180px;font-size:11px;white-space:pre-line;color:#555">${esc(k.criteria)}</td>
+    <td><div class="wbar"><span style="min-width:32px;font-weight:600">${k.weight}%</span><div class="wtrack"><div class="wfill" style="width:${k.weight}%"></div></div></div></td>
+    <td><button class="btn btn-outline btn-xs" onclick="modalEditKPI('${type}',${k.id})">수정</button> <button class="btn btn-red btn-xs" onclick="delKPI('${type}',${k.id})">삭제</button></td>
+  </tr>`).join('');
+  return`<div class="ph"><div class="ptitle">${label} 평가지표 관리</div><div class="psub">평가 항목을 추가·수정·삭제하세요. 가중치 합계 100%</div></div>
+  <div class="card"><div class="sh"><div><div class="stit">평가 항목</div><div class="ssub">가중치 합계 <strong style="color:${total===100?'#10b981':'#ef4444'}">${total}%</strong>${total===100?' ✓':' ⚠ 100%가 되어야 합니다'}</div></div>
+  <button class="btn btn-pink btn-sm" onclick="modalAddKPI('${type}')">+ 항목 추가</button></div>
+  <div class="tbl-wrap"><table class="tbl"><thead><tr><th>구분(O)</th><th>평가항목(KR)</th><th>평가 기준</th><th>가중치</th><th>관리</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+}
+function modalAddKPI(type){
+  showModal(`<div class="mtitle">${type==='mgr'?'센터장':'센터원'} 평가항목 추가</div>
+  <div class="frow"><div class="fg"><label class="fl">구분(O) *</label><input class="fi" id="k_obj"></div><div class="fg"><label class="fl">가중치(%) *</label><input class="fi" id="k_w" type="number" min="1" max="100"></div></div>
+  <div class="fg"><label class="fl">항목명(KR) *</label><input class="fi" id="k_nm"></div>
+  <div class="fg"><label class="fl">평가 기준</label><textarea class="fta" id="k_cr"></textarea></div>
+  <div class="fg"><label class="fl">비고</label><input class="fi" id="k_nt"></div>
+  <div class="mfoot"><button class="btn btn-gray" onclick="closeModal()">취소</button><button class="btn btn-pink" onclick="saveKPI('${type}')">저장</button></div>`);
+}
+function modalEditKPI(type,id){
+  const k=(type==='mgr'?S.mgrKPIs:S.staffKPIs).find(x=>x.id===id);
+  showModal(`<div class="mtitle">${type==='mgr'?'센터장':'센터원'} 평가항목 수정</div>
+  <div class="frow"><div class="fg"><label class="fl">구분(O) *</label><input class="fi" id="k_obj" value="${esc(k.obj)}"></div><div class="fg"><label class="fl">가중치(%) *</label><input class="fi" id="k_w" type="number" value="${k.weight}"></div></div>
+  <div class="fg"><label class="fl">항목명(KR) *</label><input class="fi" id="k_nm" value="${esc(k.name)}"></div>
+  <div class="fg"><label class="fl">평가 기준</label><textarea class="fta" id="k_cr">${esc(k.criteria)}</textarea></div>
+  <div class="fg"><label class="fl">비고</label><input class="fi" id="k_nt" value="${esc(k.note||'')}"></div>
+  <div class="mfoot"><button class="btn btn-gray" onclick="closeModal()">취소</button><button class="btn btn-pink" onclick="saveKPI('${type}',${id})">저장</button></div>`);
+}
+function saveKPI(type,id){
+  const obj=g('k_obj')?.value?.trim(),nm=g('k_nm')?.value?.trim(),w=parseInt(g('k_w')?.value)||0;
+  if(!obj||!nm||!w)return alert('필수 항목을 입력하세요');
+  const kpis=type==='mgr'?S.mgrKPIs:S.staffKPIs;
+  const data={obj,name:nm,weight:w,criteria:g('k_cr')?.value||'',note:g('k_nt')?.value||''};
+  if(id){const k=kpis.find(x=>x.id===id);if(k)Object.assign(k,data);}
+  else kpis.push({id:Date.now(),...data});
+  toast('저장되었습니다');closeModal();render();
+}
+function delKPI(type,id){
+  if(!confirm('삭제하시겠습니까?'))return;
+  if(type==='mgr')S.mgrKPIs=S.mgrKPIs.filter(k=>k.id!==id);
+  else S.staffKPIs=S.staffKPIs.filter(k=>k.id!==id);
+  toast('삭제되었습니다','info');render();
+}
+
+function pgMgrPerf(){
+  const approved=S.managers.filter(m=>m.status==='approved');
+  const hdr=S.mgrKPIs.map(k=>`<th style="text-align:center;min-width:150px">${esc(k.name)}<br><span style="font-weight:400;color:#aaa">${k.weight}%</span></th>`).join('');
+  const rows=approved.map(m=>{
+    const c=getCenter(m.centerId); const ekey='mgr_'+m.id;
+    const ev=S.mgrEvals[ekey]||{}; const score=calcScore(ev,S.mgrKPIs,ekey); const fg=getGrade(score);
+    const ded=deductInfo(ekey);
+    const sd=S.safetyData[ekey]||{ruleVio:0,ltiCount:0};
+    const kpiCols=S.mgrKPIs.map(k=>`<td><div class="gbrow" style="justify-content:center">${['S','A','B','C','D'].map(gr=>`<button class="gbtn${ev['kpi_'+k.id]===gr?' g'+gr:''}" onclick="setGrade('${ekey}',${k.id},'${gr}',this)">${gr}</button>`).join('')}</div></td>`).join('');
+    return`<tr>
+    <td><div style="display:flex;align-items:center;gap:7px"><div class="av ${c?.type==='kam'?'av-gn':'av-bl'}">${m.name[0]}</div><div><div style="font-weight:600">${esc(m.name)}</div><div style="font-size:10px;color:#888">${esc(getCenterName(m.centerId))}</div></div></div></td>
+    <td><span class="badge ${c?.scale==='large'?'b-large':'b-small'}">${c?.scale==='large'?'대형':'중소형'}</span></td>
+    ${kpiCols}
+    <td><input type="number" class="safety-num" min="0" value="${sd.ruleVio||0}" style="width:50px" onchange="updateSafety('${ekey}','ruleVio',this.value)" title="규정위반 건수"><span style="font-size:10px;color:#888">규정위반</span></td>
+    <td><input type="number" class="safety-num" min="0" value="${sd.ltiCount||0}" style="width:50px" onchange="updateSafety('${ekey}','ltiCount',this.value)" title="LTI 건수"><span style="font-size:10px;color:#888">LTI</span></td>
+    <td style="text-align:center"><span id="score_${ekey}" style="font-weight:700">${score!==null?score+'점':'—'}</span>${ded?`<div class="badge b-red" style="margin-top:2px;font-size:9px">감점</div>`:''}</td>
+    <td style="text-align:center"><span id="grade_${ekey}" class="badge ${fg?'b-'+fg:'b-none'}">${fg||'—'}</span></td>
+    </tr>`;
+  }).join('');
+  return`<div class="ph"><div class="ptitle">센터장 실적 현황</div><div class="psub">OKR 등급 입력 → 점수 자동 계산. 안전 위반 시 자동 감점 적용</div></div>
+  <div style="margin-bottom:10px;padding:10px 14px;background:#fff3cd;border:1px solid #ffc107;border-radius:8px;font-size:12px;color:#664d03">
+    ⚠ <strong>안전 감점 기준:</strong> 규정위반 1건 = -2점, LTI 1건 = -5점 (감점 후 최저 0점)
+  </div>
+  <div class="card"><div class="sh"><div class="stit">센터장 평가표 (테스트 10건 포함)</div><button class="btn btn-outline btn-sm" onclick="window.print()">🖨️ 인쇄</button></div>
+  <div class="tbl-wrap"><table class="tbl"><thead><tr><th>이름 / 센터</th><th>규모</th>${hdr}<th>규정위반</th><th>LTI건수</th><th>종합점수</th><th>등급</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+}
+function updateSafety(ekey,field,val){
+  if(!S.safetyData[ekey])S.safetyData[ekey]={ruleVio:0,ltiCount:0};
+  S.safetyData[ekey][field]=parseInt(val)||0;
+  const isStf=ekey.startsWith('stf_');
+  updateScoreDisplay(ekey,isStf?S.staffKPIs:S.mgrKPIs);
+  saveLocal();
+}
+
+function pgAdminSubmissions(){
+  const allStaff=S.staff.filter(s=>s.status==='approved');
+  const rows=allStaff.map(s=>{
+    const perf=S.performances[s.id]||{};
+    const agr=S.agreements[s.id]||{};
+    const rev=S.reviews[s.id]||{};
+    const statusBadge=perf.status==='agreed'?'<span class="badge b-green">합의 완료</span>':perf.status==='submitted'?'<span class="badge b-pend">제출됨</span>':perf.status==='rejected'?'<span class="badge b-red">반려</span>':perf.status==='confirmed'?'<span class="badge b-blue">본부장확인</span>':'<span class="badge b-gray">미제출</span>';
+    const revBadge=rev.status==='confirmed'?'<span class="badge b-blue">✓ 확인</span>':rev.status==='returned'?'<span class="badge b-red">반려</span>':'<span class="badge b-gray">대기</span>';
+    return`<tr><td style="font-size:11px">${esc(getCenterName(s.centerId))}</td>
+    <td><div style="display:flex;align-items:center;gap:7px"><div class="av av-pk">${s.name[0]}</div>${esc(s.name)}</div></td>
+    <td>${statusBadge}</td><td>${revBadge}</td>
+    <td><button class="btn btn-outline btn-xs" onclick="modalViewPerf(${s.id})">보기</button></td></tr>`;
+  }).join('');
+  return`<div class="ph"><div class="ptitle">실적 제출 현황</div><div class="psub">센터원 실적 제출 현황을 확인합니다</div></div>
+  <div class="card"><div class="sh"><div class="stit">센터원 제출 현황</div></div>
+  <div class="tbl-wrap"><table class="tbl"><thead><tr><th>센터</th><th>이름</th><th>제출/합의 상태</th><th>본부장 확인</th><th>보기</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+}
+
+function pgAdminReview(){
+  const tab=S.tab.adminReview||'pending';
+  const agreed=S.staff.filter(s=>s.status==='approved'&&S.performances[s.id]?.status==='agreed');
+  const confirmed=S.staff.filter(s=>s.status==='approved'&&S.reviews[s.id]?.status==='confirmed');
+  const list=tab==='pending'?agreed:confirmed;
+  const rows=list.length?list.map(s=>{
+    const agr=S.agreements[s.id]||{};
+    const rev=S.reviews[s.id]||{};
+    return`<tr>
+    <td><div style="display:flex;align-items:center;gap:7px"><div class="av av-pk">${s.name[0]}</div>${esc(s.name)}</div></td>
+    <td style="font-size:11px">${esc(getCenterName(s.centerId))}</td>
+    <td style="font-size:11px;color:#888">${agr.date||'—'}</td>
+    <td style="font-size:11px;max-width:120px">${esc(agr.note||'')}</td>
+    <td>${rev.status==='confirmed'?'<span class="badge b-blue">✓ 확인</span>':rev.status==='returned'?'<span class="badge b-red">반려</span>':'<span class="badge b-gray">대기</span>'}</td>
+    <td><button class="btn btn-outline btn-xs" onclick="modalAdminReview(${s.id})">검토</button></td>
+    </tr>`;
+  }).join(''):`<tr><td colspan="6" class="empty">검토할 실적이 없습니다</td></tr>`;
+  return`<div class="ph"><div class="ptitle">실적 검토</div><div class="psub">센터장이 합의한 실적을 최종 확인합니다</div></div>
+  <div class="tabrow" style="margin-bottom:14px">
+    <button class="tabbt${tab==='pending'?' active':''}" onclick="S.tab.adminReview='pending';render()">합의 완료 (검토대기) <span class="badge b-orange" style="margin-left:3px">${agreed.length}</span></button>
+    <button class="tabbt${tab==='done'?' active':''}" onclick="S.tab.adminReview='done';render()">처리 완료 <span class="badge b-green" style="margin-left:3px">${confirmed.length}</span></button>
+  </div>
+  <div class="card"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>이름</th><th>센터</th><th>합의일</th><th>센터장 의견</th><th>상태</th><th>처리</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+}
+function modalAdminReview(staffId){
+  const s=S.staff.find(x=>x.id===staffId);
+  const rev=S.reviews[staffId]||{};
+  showModal(`<div class="mtitle">${esc(s.name)} 실적 최종 검토</div>
+  <div style="font-size:12px;color:#888;margin-bottom:12px">${esc(getCenterName(s.centerId))}</div>
+  <div class="fg"><label class="fl">검토 의견</label><textarea class="fta" id="r_note">${esc(rev.note||'')}</textarea></div>
+  <div class="mfoot"><button class="btn btn-gray" onclick="closeModal()">취소</button>
+  <button class="btn btn-red btn-sm" onclick="doAdminReview(${staffId},'returned')">반려</button>
+  <button class="btn btn-green btn-sm" onclick="doAdminReview(${staffId},'confirmed')">✓ 확인</button></div>`);
+}
+function doAdminReview(staffId,status){
+  S.reviews[staffId]={status,note:g('r_note')?.value||'',date:new Date().toLocaleDateString('ko-KR')};
+  if(status==='confirmed') S.performances[staffId].status='confirmed';
+  saveLocal(); toast(status==='confirmed'?'확인 처리되었습니다':'반려 처리되었습니다',status==='confirmed'?'success':'warn');
+  closeModal();render();
+}
+
+function pgAdminRanking(){
+  const cf=S.tab.adminRankCenter||'all';
+  let list=cf==='all'?S.staff.filter(s=>s.status==='approved'):S.staff.filter(s=>s.status==='approved'&&s.centerId===parseInt(cf));
+  const scored=list.map(s=>{const ekey='stf_'+s.id;return{...s,score:calcScore(S.staffEvals[ekey]||{},S.staffKPIs,ekey),grade:getGrade(calcScore(S.staffEvals[ekey]||{},S.staffKPIs,ekey))};}).sort((a,b)=>(b.score||0)-(a.score||0));
+  const cOpts=`<option value="all">전체 센터</option>`+S.centers.map(c=>`<option value="${c.id}"${c.id===parseInt(cf)?' selected':''}>${esc(c.name)}</option>`).join('');
+  const rows=scored.length?scored.map((s,i)=>{
+    const rank=i+1;
+    return`<tr><td><div class="rbox ${rank===1?'rk1':rank===2?'rk2':rank===3?'rk3':'rkn'}">${rank}</div></td>
+    <td><div style="display:flex;align-items:center;gap:7px"><div class="av av-pk">${s.name[0]}</div><span style="font-weight:600">${esc(s.name)}</span></div></td>
+    <td style="font-size:11px">${esc(getCenterName(s.centerId))}</td>
+    <td style="text-align:center;font-weight:700">${s.score!==null?s.score+'점':'—'}</td>
+    <td style="text-align:center"><span class="badge ${s.grade?'b-'+s.grade:'b-none'}">${s.grade||'—'}</span></td>
+    <td><button class="btn btn-outline btn-xs" onclick="modalStaffEvalAdmin(${s.id})">평가 입력</button></td></tr>`;
+  }).join(''):`<tr><td colspan="6" class="empty">센터원 데이터 없음</td></tr>`;
+  return`<div class="ph"><div class="ptitle">센터원 순위 조회</div><div class="psub">전체 센터원 OKR 평가 점수 및 순위 (본부장 전체 공개)</div></div>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+    <select class="fi" style="width:220px" onchange="S.tab.adminRankCenter=this.value;render()">${cOpts}</select>
+    <button class="btn btn-pink btn-sm" onclick="modalAddStaff()">+ 센터원 추가</button>
+  </div>
+  <div class="card"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>순위</th><th>이름</th><th>소속 센터</th><th>종합 점수</th><th>등급</th><th>처리</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+}
+function modalStaffEvalAdmin(staffId){
+  const s=S.staff.find(x=>x.id===staffId); const ekey='stf_'+staffId;
+  if(!S.staffEvals[ekey])S.staffEvals[ekey]={};
+  const ev=S.staffEvals[ekey];
+  const sd=S.safetyData[ekey]||{ruleVio:0,ltiCount:0};
+  const kpiRows=S.staffKPIs.map(k=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-bottom:1px solid #f5f5f5">
+    <div><div style="font-size:12px;font-weight:600">${esc(k.name)}</div><div style="font-size:10px;color:#888">${esc(k.obj)}·${k.weight}%</div></div>
+    <div class="gbrow">${['S','A','B','C','D'].map(gr=>`<button class="gbtn${ev['kpi_'+k.id]===gr?' g'+gr:''}" onclick="setGrade('${ekey}',${k.id},'${gr}',this)">${gr}</button>`).join('')}</div>
+  </div>`).join('');
+  const score=calcScore(ev,S.staffKPIs,ekey);const fg=getGrade(score);
+  showModal(`<div class="mtitle">${esc(s.name)} 센터원 평가</div>
+  <div style="font-size:11px;color:#888;margin-bottom:12px">${esc(getCenterName(s.centerId))}</div>
+  ${kpiRows}
+  <div class="safety-input"><h4>🛡 안전 위반 건수 입력 (감점 자동 적용)</h4>
+  <div class="safety-row"><label>규정위반 건수 (-2점/건)</label><input type="number" class="safety-num" id="sd_rv" min="0" value="${sd.ruleVio||0}" onchange="updateSafety('${ekey}','ruleVio',this.value)"><span class="deduct-preview" id="ded_rv">-${(sd.ruleVio||0)*2}점</span></div>
+  <div class="safety-row"><label>LTI 건수 (-5점/건)</label><input type="number" class="safety-num" id="sd_lt" min="0" value="${sd.ltiCount||0}" onchange="updateSafety('${ekey}','ltiCount',this.value)"><span class="deduct-preview" id="ded_lt">-${(sd.ltiCount||0)*5}점</span></div></div>
+  <div id="deduct_${ekey}" class="ded-box" style="${(sd.ruleVio||0)+(sd.ltiCount||0)>0?'':'display:none'}"><strong>⚠ 안전 감점 적용 중</strong>${esc(deductInfo(ekey)||'')}</div>
+  <div style="margin-top:12px;padding:11px;background:#f8f9fa;border-radius:9px;display:flex;justify-content:space-between;align-items:center">
+    <span style="font-size:12px;color:#555">종합 점수</span>
+    <div><span id="score_${ekey}" style="font-weight:700;font-size:15px">${score!==null?score+'점':'—'}</span>
+    <span id="grade_${ekey}" class="badge ${fg?'b-'+fg:'b-none'}" style="margin-left:7px">${fg||'—'}</span></div>
+  </div>
+  <div class="mfoot"><button class="btn btn-gray" onclick="closeModal()">닫기</button><button class="btn btn-pink" onclick="closeModal();render()">확인</button></div>`);
+}
+function modalAddStaff(){
+  const opts=S.centers.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('');
+  showModal(`<div class="mtitle">센터원 추가</div>
+  <div class="frow"><div class="fg"><label class="fl">이름 *</label><input class="fi" id="sf_nm"></div><div class="fg"><label class="fl">이메일 *</label><input class="fi" id="sf_em" type="email"></div></div>
+  <div class="frow"><div class="fg"><label class="fl">소속 센터 *</label><select class="fs" id="sf_cid">${opts}</select></div>
+  <div class="fg"><label class="fl">입사일</label><input class="fi" id="sf_dt" type="date" value="${new Date().toISOString().slice(0,10)}"></div></div>
+  <div class="mfoot"><button class="btn btn-gray" onclick="closeModal()">취소</button><button class="btn btn-pink" onclick="addStaff()">저장</button></div>`);
+}
+function addStaff(){
+  const nm=g('sf_nm')?.value?.trim(),em=g('sf_em')?.value?.trim();
+  if(!nm||!em)return alert('이름과 이메일을 입력하세요');
+  S.staff.push({id:Date.now(),name:nm,email:em,centerId:parseInt(g('sf_cid')?.value),joinDate:g('sf_dt')?.value,status:'approved'});
+  toast('추가되었습니다');closeModal();render();
+}
+
+function pgFinalize(){
+  const approved=S.managers.filter(m=>m.status==='approved');
+  const evalDone=approved.filter(m=>{const ev=S.mgrEvals['mgr_'+m.id]||{};return S.mgrKPIs.every(k=>ev['kpi_'+k.id]);});
+  const scores=approved.map(m=>calcScore(S.mgrEvals['mgr_'+m.id]||{},S.mgrKPIs,'mgr_'+m.id)).filter(s=>s!==null);
+  const avg=scores.length?Math.round(scores.reduce((a,b)=>a+b,0)/scores.length):0;
+  const gd={S:0,A:0,B:0,C:0,D:0};
+  scores.forEach(s=>{const gv=getGrade(s);if(gv)gd[gv]++;});
+  const maxV=Math.max(...Object.values(gd),1);
+  const bars=Object.entries(gd).map(([gv,v])=>`<div style="display:flex;flex-direction:column;align-items:center;gap:5px"><div style="font-size:12px;font-weight:700;color:#555">${v}명</div><div style="width:40px;height:${Math.round(v/maxV*70)+10}px;border-radius:5px 5px 0 0;background:${GC[gv]||'#ddd'}"></div><span class="badge b-${gv}">${gv}</span></div>`).join('');
+  const checks=[
+    ['평가지표 확정',S.mgrKPIs.length>0,`${S.mgrKPIs.length}개 항목`],
+    ['평가 입력 완료',evalDone.length===approved.length,`${evalDone.length}/${approved.length}명`],
+    ['실적 검토 완료',Object.keys(S.reviews).length>0,`${Object.values(S.reviews).filter(r=>r.status==='confirmed').length}건 확인`],
+  ].map(([lbl,ok,nt])=>`<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid #f5f5f5">
+    <div style="width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;background:${ok?'#d1fae5':'#fee2e2'};color:${ok?'#065f46':'#991b1b'}">${ok?'✓':'!'}</div>
+    <div style="flex:1"><span style="font-weight:600">${lbl}</span> <span style="font-size:11px;color:#888">${nt}</span></div>
+    <span class="badge ${ok?'b-green':'b-orange'}">${ok?'완료':'미완료'}</span></div>`).join('');
+  return`<div class="ph"><div class="ptitle">분기 평가 완료 처리</div><div class="psub">2025년 하반기 평가를 최종 마감합니다</div></div>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:16px">
+    <div class="sc"><div class="sn" style="color:#3b82f6">${approved.length}</div><div class="sl">총 센터장 수</div></div>
+    <div class="sc"><div class="sn" style="color:#10b981">${evalDone.length}</div><div class="sl">평가 완료</div></div>
+    <div class="sc"><div class="sn" style="color:#e91e8c">${avg}<span style="font-size:16px;color:#aaa">점</span></div><div class="sl">평균 점수</div></div>
+  </div>
+  <div class="card" style="margin-bottom:14px"><div class="sh"><div class="stit">등급 분포</div></div>
+  <div style="padding:18px;display:flex;justify-content:center"><div style="display:flex;gap:16px;align-items:flex-end;height:110px">${bars}</div></div></div>
+  <div class="card"><div class="sh"><div class="stit">마감 체크리스트</div></div>
+  <div style="padding:14px 16px">${checks}
+  <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+    <button class="btn btn-outline" onclick="exportResult()">📊 결과 내보내기</button>
+    <button class="btn btn-pink" onclick="alert('최종 마감 처리되었습니다.')">🏁 최종 마감</button>
+  </div></div></div>`;
+}
+function exportResult(){
+  const lines=['서울6본부 OKR 평가 결과\n2025년 하반기\n\n이름\t센터\t규모\t종합점수\t등급\t규정위반\tLTI'];
+  S.managers.filter(m=>m.status==='approved').forEach(m=>{
+    const ekey='mgr_'+m.id; const c=getCenter(m.centerId);
+    const score=calcScore(S.mgrEvals[ekey]||{},S.mgrKPIs,ekey);
+    const sd=S.safetyData[ekey]||{ruleVio:0,ltiCount:0};
+    lines.push([m.name,getCenterName(m.centerId),c?.scale==='large'?'대형':'중소형',score||'—',getGrade(score)||'—',sd.ruleVio||0,sd.ltiCount||0].join('\t'));
+  });
+  const blob=new Blob([lines.join('\n')],{type:'text/plain;charset=utf-8'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='서울6본부_OKR평가결과_2025하반기.txt';a.click();
+}
+
+function pgCenters(){
+  const fil=S.tab.ctType||'all';
+  const list=fil==='all'?S.centers:S.centers.filter(c=>c.type===fil);
+  const rows=list.map(c=>{
+    const mgr=S.managers.find(m=>m.centerId===c.id&&m.status==='approved');
+    return`<tr><td><span style="font-weight:600">${esc(c.name)}</span></td>
+    <td><span class="badge ${c.scale==='large'?'b-large':'b-small'}">${c.scale==='large'?'대형':'중소형'}</span></td>
+    <td><span class="badge ${c.type==='kam'?'b-orange':'b-gray'}">${c.type==='kam'?'KAM':'직할'}</span></td>
+    <td>${mgr?`<div style="display:flex;align-items:center;gap:5px"><div class="av av-bl" style="width:24px;height:24px;font-size:10px">${mgr.name[0]}</div>${esc(mgr.name)}</div>`:'<span style="color:#aaa">미배정</span>'}</td>
+    <td><button class="btn btn-outline btn-xs" onclick="editCenter(${c.id})">수정</button> <button class="btn btn-red btn-xs" onclick="delCenter(${c.id})">삭제</button></td></tr>`;
+  }).join('');
+  return`<div class="ph"><div class="ptitle">센터 관리</div><div class="psub">센터를 추가·수정·삭제합니다</div></div>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+    <div class="tabrow">
+      <button class="tabbt${fil==='all'?' active':''}" onclick="S.tab.ctType='all';render()">전체 ${S.centers.length}</button>
+      <button class="tabbt${fil==='direct'?' active':''}" onclick="S.tab.ctType='direct';render()">직할</button>
+      <button class="tabbt${fil==='kam'?' active':''}" onclick="S.tab.ctType='kam';render()">KAM</button>
+    </div>
+    <button class="btn btn-pink btn-sm" onclick="addCenter()">+ 센터 추가</button>
+  </div>
+  <div class="card"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>센터명</th><th>규모</th><th>유형</th><th>센터장</th><th>관리</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+}
+function addCenter(){
+  showModal(`<div class="mtitle">센터 추가</div>
+  <div class="fg"><label class="fl">센터명 *</label><input class="fi" id="c_nm" placeholder="예: ○○운영센터"></div>
+  <div class="frow"><div class="fg"><label class="fl">규모</label><select class="fs" id="c_sc"><option value="large">대형</option><option value="small" selected>중소형</option></select></div>
+  <div class="fg"><label class="fl">유형</label><select class="fs" id="c_tp"><option value="direct" selected>직할</option><option value="kam">KAM</option></select></div></div>
+  <div class="mfoot"><button class="btn btn-gray" onclick="closeModal()">취소</button><button class="btn btn-pink" onclick="saveCenter()">저장</button></div>`);
+}
+function editCenter(id){
+  const c=S.centers.find(x=>x.id===id);
+  showModal(`<div class="mtitle">센터 수정</div>
+  <div class="fg"><label class="fl">센터명 *</label><input class="fi" id="c_nm" value="${esc(c.name)}"></div>
+  <div class="frow"><div class="fg"><label class="fl">규모</label><select class="fs" id="c_sc"><option value="large"${c.scale==='large'?' selected':''}>대형</option><option value="small"${c.scale!=='large'?' selected':''}>중소형</option></select></div>
+  <div class="fg"><label class="fl">유형</label><select class="fs" id="c_tp"><option value="direct"${c.type==='direct'?' selected':''}>직할</option><option value="kam"${c.type==='kam'?' selected':''}>KAM</option></select></div></div>
+  <div class="mfoot"><button class="btn btn-gray" onclick="closeModal()">취소</button><button class="btn btn-pink" onclick="saveCenter(${id})">저장</button></div>`);
+}
+function saveCenter(id){
+  const nm=g('c_nm')?.value?.trim();if(!nm)return alert('센터명을 입력하세요');
+  if(id){const c=S.centers.find(x=>x.id===id);if(c)Object.assign(c,{name:nm,scale:g('c_sc')?.value,type:g('c_tp')?.value});}
+  else S.centers.push({id:Date.now(),name:nm,scale:g('c_sc')?.value,type:g('c_tp')?.value});
+  toast('저장되었습니다');closeModal();render();
+}
+function delCenter(id){if(!confirm('삭제하시겠습니까?'))return;S.centers=S.centers.filter(c=>c.id!==id);toast('삭제','info');render();}
+function modalViewPerf(staffId){
+  const s=S.staff.find(x=>x.id===staffId);
+  const perf=S.performances[staffId]||{};
+  const agr=S.agreements[staffId]||{};
+  const kpiRows=S.staffKPIs.map(k=>{const d=perf.kpiData?.[k.id]||{};return`<div style="border:1px solid #eee;border-radius:8px;padding:10px 12px;margin-bottom:8px"><div style="font-size:12px;font-weight:700;margin-bottom:4px">${esc(k.name)} <span style="font-weight:400;color:#aaa">(${k.weight}%)</span></div><div style="font-size:11px;color:#555">${esc(d.content||'(미입력)')}</div></div>`;}).join('');
+  showModal(`<div class="mtitle">${esc(s.name)} 실적 내용</div>
+  <div style="font-size:11px;color:#888;margin-bottom:12px">${esc(getCenterName(s.centerId))} · 제출일: ${perf.submittedAt||'—'}</div>
+  ${kpiRows||'<div class="empty">제출된 실적이 없습니다</div>'}
+  <div class="mfoot"><button class="btn btn-gray" onclick="closeModal()">닫기</button></div>`);
+}
+
+// ══════════════════════════════════════════
+//  ② 센터장 PAGES
+// ══════════════════════════════════════════
+function pgMgrDashboard(){
+  const cid=S.user.centerId;
+  const myStaff=S.staff.filter(s=>s.centerId===cid);
+  const submitted=myStaff.filter(s=>S.performances[s.id]?.status==='submitted').length;
+  const pendingAppr=myStaff.filter(s=>s.status==='pending').length;
+  const m=S.managers.find(x=>x.id===S.user.managerId);
+  const myEkey=m?'mgr_'+m.id:'';
+  const myScore=myEkey?calcScore(S.mgrEvals[myEkey]||{},S.mgrKPIs,myEkey):null;
+  const myGrade=getGrade(myScore);
+  return`<div class="ph"><div class="ptitle">환영합니다, ${esc(S.user.name)}님!</div>
+  <div class="psub">센터장 대시보드 · 센터원 승인 및 평가를 수행할 수 있습니다</div></div>
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:11px;margin-bottom:18px">
+    <div class="sc"><div class="sn">${myStaff.filter(s=>s.status==='approved').length}</div><div class="sl">소속 센터원</div></div>
+    <div class="sc"><div class="sn">${submitted}</div><div class="sl">실적 제출 (검토대기)</div></div>
+    <div class="sc"><div class="sn">${myScore!==null?myScore+'점':'—'}</div><div class="sl">내 종합점수</div><span class="stag ${myGrade?'b-'+myGrade:'b-none'}">${myGrade||'미평가'}</span></div>
+  </div>
+  <div class="qg" style="grid-template-columns:repeat(4,1fr)">
+    <div class="qc" onclick="go('staff-approval')"><div class="qi ic-blue">👤</div><h4>센터원 승인</h4><p>가입 대기 중인 센터원 승인</p></div>
+    <div class="qc" onclick="go('staff-manage')"><div class="qi ic-green">👥</div><h4>센터원 관리</h4><p>센터원 일시정지 및 삭제</p></div>
+    <div class="qc" onclick="go('agreement')"><div class="qi ic-orange">🤝</div><h4>합의 관리</h4><p>센터원 실적 합의 승인/재검토</p></div>
+    <div class="qc" onclick="go('perf-status')"><div class="qi ic-teal">👁</div><h4>실적 제출 현황</h4><p>센터원 실적 제출 현황 확인</p></div>
+    <div class="qc" onclick="go('staff-review')"><div class="qi ic-pink">📝</div><h4>실적 검토</h4><p>센터원 실적 승인/반려 및 확정</p></div>
+    <div class="qc" onclick="go('staff-eval')"><div class="qi ic-purple">📋</div><h4>센터원 평가</h4><p>분기별 센터원 평가 진행</p></div>
+    <div class="qc" onclick="go('my-eval')"><div class="qi ic-am">🎯</div><h4>내 센터장 평가</h4><p>연도별 내 실적 입력 및 순위</p></div>
+    <div class="qc" onclick="go('center-rank')"><div class="qi ic-red">📊</div><h4>센터원 순위 조회</h4><p>센터원 순위 및 점수 확인</p></div>
+  </div>
+  <div class="card"><div class="sh"><div class="stit">내 정보</div></div>
+  <div style="padding:14px 16px"><table class="info-tbl">
+    <tr><td>이름</td><td>${esc(S.user.name)}</td></tr>
+    <tr><td>이메일</td><td>${esc(S.user.email)}</td></tr>
+    <tr><td>직책</td><td>센터장</td></tr>
+    <tr><td>소속</td><td>${esc(getCenterName(cid))}</td></tr>
+  </table></div></div>`;
+}
+
+function pgStaffApproval(){
+  const cid=S.user.centerId;
+  const pend=S.staff.filter(s=>s.centerId===cid&&s.status==='pending');
+  const appr=S.staff.filter(s=>s.centerId===cid&&s.status==='approved');
+  const tab=S.tab.staffAppr||'pending';
+  const list=tab==='pending'?pend:appr;
+  const rows=list.length?list.map(s=>`<tr>
+    <td><div style="display:flex;align-items:center;gap:7px"><div class="av av-pk">${s.name[0]}</div><div><div style="font-weight:600">${esc(s.name)}</div><div style="font-size:10px;color:#888">${esc(s.email)}</div></div></div></td>
+    <td>${s.joinDate}</td>
+    <td>${tab==='pending'
+      ?`<button class="btn btn-green btn-xs" onclick="approveStaff(${s.id})">✓ 승인</button> <button class="btn btn-red btn-xs" onclick="rejectStaff(${s.id})">✕</button>`
+      :`<span class="badge b-green">✓ 승인</span>`
+    }</td></tr>`).join(''):`<tr><td colspan="3" class="empty">없음</td></tr>`;
+  return`<div class="ph"><div class="ptitle">센터원 승인</div><div class="psub">소속 센터원 가입 신청을 검토합니다</div></div>
+  <div class="tabrow" style="margin-bottom:14px">
+    <button class="tabbt${tab==='pending'?' active':''}" onclick="S.tab.staffAppr='pending';render()">대기 ${pend.length}</button>
+    <button class="tabbt${tab==='approved'?' active':''}" onclick="S.tab.staffAppr='approved';render()">승인 완료 ${appr.length}</button>
+  </div>
+  <div class="card"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>이름</th><th>입사일</th><th>처리</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+}
+function approveStaff(id){const s=S.staff.find(x=>x.id===id);if(s){s.status='approved';toast(s.name+' 승인');render();}}
+function rejectStaff(id){if(confirm('거절?')){S.staff=S.staff.filter(x=>x.id!==id);toast('거절','info');render();}}
+
+function pgStaffManage(){
+  const cid=S.user.centerId;
+  const list=S.staff.filter(s=>s.centerId===cid&&s.status==='approved');
+  const rows=list.length?list.map(s=>`<tr>
+    <td><div style="display:flex;align-items:center;gap:7px"><div class="av av-pk">${s.name[0]}</div><span style="font-weight:600">${esc(s.name)}</span></div></td>
+    <td style="font-size:11px;color:#888">${esc(s.email)}</td><td>${s.joinDate||'—'}</td>
+    <td><button class="btn btn-red btn-xs" onclick="if(confirm('삭제?')){S.staff=S.staff.filter(x=>x.id!==${s.id});render();}">삭제</button></td>
+  </tr>`).join(''):`<tr><td colspan="4" class="empty">소속 센터원 없음</td></tr>`;
+  return`<div class="ph"><div class="ptitle">센터원 관리</div><div class="psub">소속 센터원을 관리합니다</div></div>
+  <div class="card"><div class="sh"><div class="stit">소속 센터원</div><button class="btn btn-pink btn-sm" onclick="modalAddStaffMgr()">+ 추가</button></div>
+  <div class="tbl-wrap"><table class="tbl"><thead><tr><th>이름</th><th>이메일</th><th>입사일</th><th>관리</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+}
+function modalAddStaffMgr(){
+  showModal(`<div class="mtitle">센터원 추가</div>
+  <div class="frow"><div class="fg"><label class="fl">이름 *</label><input class="fi" id="sf_nm"></div><div class="fg"><label class="fl">이메일 *</label><input class="fi" id="sf_em" type="email"></div></div>
+  <div class="fg"><label class="fl">입사일</label><input class="fi" id="sf_dt" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+  <div class="mfoot"><button class="btn btn-gray" onclick="closeModal()">취소</button><button class="btn btn-pink" onclick="addStaffByMgr()">저장</button></div>`);
+}
+function addStaffByMgr(){
+  const nm=g('sf_nm')?.value?.trim(),em=g('sf_em')?.value?.trim();
+  if(!nm||!em)return alert('필수 항목 입력');
+  S.staff.push({id:Date.now(),name:nm,email:em,centerId:S.user.centerId,joinDate:g('sf_dt')?.value,status:'approved'});
+  toast('추가');closeModal();render();
+}
+
+function pgAgreement(){
+  const cid=S.user.centerId;
+  const submitted=S.staff.filter(s=>s.centerId===cid&&s.status==='approved'&&S.performances[s.id]?.status==='submitted');
+  const done=S.staff.filter(s=>s.centerId===cid&&s.status==='approved'&&['agreed','rejected'].includes(S.performances[s.id]?.status));
+  const tab=S.tab.agrTab||'pending';
+  const list=tab==='pending'?submitted:done;
+  const rows=list.length?list.map(s=>{
+    const perf=S.performances[s.id]||{};
+    const agr=S.agreements[s.id]||{};
+    return`<tr><td><div style="display:flex;align-items:center;gap:7px"><div class="av av-pk">${s.name[0]}</div>${esc(s.name)}</div></td>
+    <td style="font-size:11px;color:#888">${perf.submittedAt||'—'}</td>
+    <td>${perf.status==='agreed'?'<span class="badge b-green">합의 완료</span>':perf.status==='rejected'?'<span class="badge b-red">반려</span>':'<span class="badge b-pend">검토 대기</span>'}</td>
+    <td style="font-size:11px;max-width:120px">${esc(agr.note||'')}</td>
+    <td>
+      <button class="btn btn-outline btn-xs" onclick="modalViewPerfMgr(${s.id})">보기</button>
+      ${tab==='pending'?`<button class="btn btn-green btn-xs" onclick="doAgree(${s.id},'agreed')" style="margin-left:4px">✓ 합의</button><button class="btn btn-red btn-xs" onclick="doAgree(${s.id},'rejected')" style="margin-left:4px">반려</button>`:''}
+    </td></tr>`;
+  }).join(''):`<tr><td colspan="5" class="empty">없음</td></tr>`;
+  return`<div class="ph"><div class="ptitle">합의 관리</div><div class="psub">센터원이 제출한 실적을 검토하고 합의 여부를 결정합니다</div></div>
+  <div style="background:#e8f4fd;border:1px solid #bde0fe;border-radius:8px;padding:10px 14px;font-size:11px;color:#1e40af;margin-bottom:14px">
+    📌 워크플로우: <strong>센터원 실적 제출</strong> → <strong>센터장 합의</strong> → <strong>본부장 확인</strong>
+  </div>
+  <div class="tabrow" style="margin-bottom:14px">
+    <button class="tabbt${tab==='pending'?' active':''}" onclick="S.tab.agrTab='pending';render()">합의 대기 <span class="badge b-orange" style="margin-left:3px">${submitted.length}</span></button>
+    <button class="tabbt${tab==='done'?' active':''}" onclick="S.tab.agrTab='done';render()">처리 완료 <span class="badge b-green" style="margin-left:3px">${done.length}</span></button>
+  </div>
+  <div class="card"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>이름</th><th>제출일</th><th>상태</th><th>의견</th><th>처리</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+}
+function doAgree(staffId,status){
+  S.performances[staffId].status=status;
+  S.agreements[staffId]={status:status==='agreed'?'approved':'rejected',note:'',date:new Date().toLocaleDateString('ko-KR'),managerId:S.user.managerId};
+  saveLocal();toast(status==='agreed'?'합의 완료':'반려 처리',status==='agreed'?'success':'warn');render();
+}
+function modalViewPerfMgr(staffId){
+  const s=S.staff.find(x=>x.id===staffId);
+  const perf=S.performances[staffId]||{};
+  const kpiRows=S.staffKPIs.map(k=>{const d=perf.kpiData?.[k.id]||{};return`<div style="border:1px solid #eee;border-radius:7px;padding:9px 11px;margin-bottom:7px"><div style="font-size:12px;font-weight:700;margin-bottom:3px">${esc(k.name)} <span style="font-weight:400;color:#aaa">(${k.weight}%)</span></div><div style="font-size:11px;color:#555">${esc(d.content||'(미입력)')}</div>${d.evidence?`<div style="font-size:10px;color:#888;margin-top:3px">📎 ${esc(d.evidence)}</div>`:''}</div>`;}).join('');
+  showModal(`<div class="mtitle">${esc(s.name)} 실적 내용</div>
+  <div style="font-size:11px;color:#888;margin-bottom:12px">제출일: ${perf.submittedAt||'—'}</div>
+  ${kpiRows||'<div class="empty">제출 내용 없음</div>'}
+  <div class="fg" style="margin-top:12px"><label class="fl">합의/반려 의견</label><input class="fi" id="agr_note" placeholder="의견 입력"></div>
+  <div class="mfoot"><button class="btn btn-gray" onclick="closeModal()">닫기</button>
+  <button class="btn btn-red btn-sm" onclick="doAgreeWithNote(${staffId},'rejected')">반려</button>
+  <button class="btn btn-green btn-sm" onclick="doAgreeWithNote(${staffId},'agreed')">✓ 합의</button></div>`);
+}
+function doAgreeWithNote(staffId,status){
+  S.performances[staffId]={...S.performances[staffId]||{},status};
+  S.agreements[staffId]={status:status==='agreed'?'approved':'rejected',note:g('agr_note')?.value||'',date:new Date().toLocaleDateString('ko-KR'),managerId:S.user.managerId};
+  saveLocal();toast(status==='agreed'?'합의 완료':'반려 처리',status==='agreed'?'success':'warn');closeModal();render();
+}
+
+function pgMgrPerfStatus(){
+  const cid=S.user.centerId;
+  const myStaff=S.staff.filter(s=>s.centerId===cid&&s.status==='approved');
+  const rows=myStaff.map(s=>{
+    const perf=S.performances[s.id]||{};
+    const agr=S.agreements[s.id]||{};
+    const stBadge=perf.status==='confirmed'?'<span class="badge b-blue">본부장확인</span>':perf.status==='agreed'?'<span class="badge b-green">합의완료</span>':perf.status==='submitted'?'<span class="badge b-pend">제출됨</span>':perf.status==='rejected'?'<span class="badge b-red">반려</span>':'<span class="badge b-gray">미제출</span>';
+    return`<tr><td><div style="display:flex;align-items:center;gap:7px"><div class="av av-pk">${s.name[0]}</div>${esc(s.name)}</div></td>
+    <td>${stBadge}</td>
+    <td style="font-size:11px;color:#888">${perf.submittedAt||'—'}</td>
+    <td style="font-size:11px">${esc(agr.note||'')}</td></tr>`;
+  }).join('');
+  return`<div class="ph"><div class="ptitle">실적 제출 현황</div><div class="psub">소속 센터원의 실적 제출 현황을 확인합니다</div></div>
+  <div class="card"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>이름</th><th>상태</th><th>제출일</th><th>의견</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+}
+
+function pgMgrReview(){
+  const cid=S.user.centerId;
+  const agreed=S.staff.filter(s=>s.centerId===cid&&S.performances[s.id]?.status==='agreed');
+  const rows=agreed.length?agreed.map(s=>{
+    const perf=S.performances[s.id]||{};
+    return`<tr><td><div style="display:flex;align-items:center;gap:7px"><div class="av av-pk">${s.name[0]}</div>${esc(s.name)}</div></td>
+    <td style="font-size:11px;color:#888">${perf.submittedAt||'—'}</td>
+    <td><button class="btn btn-outline btn-xs" onclick="modalViewPerfMgr(${s.id})">상세 보기</button></td></tr>`;
+  }).join(''):`<tr><td colspan="3" class="empty">검토할 실적이 없습니다</td></tr>`;
+  return`<div class="ph"><div class="ptitle">실적 검토</div><div class="psub">합의 완료된 실적을 재확인합니다</div></div>
+  <div class="card"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>이름</th><th>제출일</th><th>처리</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+}
+
+function pgStaffEval(){
+  const cid=S.user.centerId;
+  const myStaff=S.staff.filter(s=>s.centerId===cid&&s.status==='approved');
+  const hdr=S.staffKPIs.map(k=>`<th style="text-align:center;min-width:120px;font-size:10px">${esc(k.name)}<br><span style="font-weight:400;color:#aaa">${k.weight}%</span></th>`).join('');
+  const rows=myStaff.map(s=>{
+    const ekey='stf_'+s.id; const ev=S.staffEvals[ekey]||{};
+    const score=calcScore(ev,S.staffKPIs,ekey); const fg=getGrade(score);
+    const kpiCols=S.staffKPIs.map(k=>`<td><div class="gbrow" style="justify-content:center">${['S','A','B','C','D'].map(gr=>`<button class="gbtn${ev['kpi_'+k.id]===gr?' g'+gr:''}" onclick="setGrade('${ekey}',${k.id},'${gr}',this)">${gr}</button>`).join('')}</div></td>`).join('');
+    return`<tr><td><div style="display:flex;align-items:center;gap:7px"><div class="av av-pk">${s.name[0]}</div><span style="font-weight:600">${esc(s.name)}</span></div></td>
+    ${kpiCols}
+    <td style="text-align:center"><span id="score_${ekey}" style="font-weight:700">${score!==null?score+'점':'—'}</span></td>
+    <td style="text-align:center"><span id="grade_${ekey}" class="badge ${fg?'b-'+fg:'b-none'}">${fg||'—'}</span></td></tr>`;
+  }).join('');
+  return`<div class="ph"><div class="ptitle">센터원 평가</div><div class="psub">소속 센터원의 OKR 등급을 입력합니다</div></div>
+  <div class="card"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>이름</th>${hdr}<th>종합점수</th><th>등급</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+}
+
+function pgMyEval(){
+  const m=S.managers.find(x=>x.id===S.user.managerId);
+  if(!m) return`<div class="empty">센터장 정보를 찾을 수 없습니다</div>`;
+  const ekey='mgr_'+m.id; const ev=S.mgrEvals[ekey]||{};
+  const score=calcScore(ev,S.mgrKPIs,ekey); const fg=getGrade(score);
+  const sd=S.safetyData[ekey]||{ruleVio:0,ltiCount:0};
+  const ded=deductInfo(ekey);
+  const kpiRows=S.mgrKPIs.map(k=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:11px 0;border-bottom:1px solid #f5f5f5">
+    <div><div style="font-size:13px;font-weight:600">${esc(k.name)}</div><div style="font-size:11px;color:#888">${esc(k.obj)} · ${k.weight}%</div></div>
+    <span class="badge ${ev['kpi_'+k.id]?'b-'+ev['kpi_'+k.id]:'b-none'}" style="font-size:13px;padding:4px 12px">${ev['kpi_'+k.id]||'—'}</span>
+  </div>`).join('');
+  return`<div class="ph"><div class="ptitle">내 센터장 평가</div><div class="psub">본부장이 입력한 나의 OKR 평가 결과를 확인합니다</div></div>
+  <div class="card">
+    <div style="padding:18px 16px">
+      <div style="display:flex;align-items:center;gap:16px;padding-bottom:16px;border-bottom:1px solid #f0f0f0;margin-bottom:16px">
+        <div style="flex:1">
+          <div style="font-size:22px;font-weight:700;color:#111">${score!==null?score+'점':'미평가'}</div>
+          <div style="font-size:12px;color:#888">종합 점수</div>
+        </div>
+        <span class="badge ${fg?'b-'+fg:'b-none'}" style="font-size:20px;padding:10px 20px">${fg||'—'}</span>
+      </div>
+      ${kpiRows}
+      ${ded?`<div class="ded-box" style="margin-top:12px"><strong>⚠ 안전 감점 적용</strong>${esc(ded)}</div>`:''}
+      ${(sd.ruleVio||sd.ltiCount)?`<div style="margin-top:10px;font-size:11px;color:#555">규정위반 ${sd.ruleVio}건, LTI ${sd.ltiCount}건 기록됨</div>`:''}
+    </div>
+  </div>`;
+}
+
+function pgCenterRank(){
+  const cid=S.user.centerId;
+  const list=S.staff.filter(s=>s.centerId===cid&&s.status==='approved');
+  const scored=list.map(s=>{const ekey='stf_'+s.id;return{...s,score:calcScore(S.staffEvals[ekey]||{},S.staffKPIs,ekey),grade:getGrade(calcScore(S.staffEvals[ekey]||{},S.staffKPIs,ekey))};}).sort((a,b)=>(b.score||0)-(a.score||0));
+  const rows=scored.length?scored.map((s,i)=>{
+    const rank=i+1;
+    return`<tr><td><div class="rbox ${rank===1?'rk1':rank===2?'rk2':rank===3?'rk3':'rkn'}">${rank}</div></td>
+    <td><div style="display:flex;align-items:center;gap:7px"><div class="av av-pk">${s.name[0]}</div><span style="font-weight:600">${esc(s.name)}</span></div></td>
+    <td style="text-align:center;font-weight:700">${s.score!==null?s.score+'점':'—'}</td>
+    <td style="text-align:center"><span class="badge ${s.grade?'b-'+s.grade:'b-none'}">${s.grade||'—'}</span></td></tr>`;
+  }).join(''):`<tr><td colspan="4" class="empty">평가 데이터 없음</td></tr>`;
+  return`<div class="ph"><div class="ptitle">센터원 순위 조회</div><div class="psub">소속 센터원 전체 OKR 순위 (센터장은 전체 공개)</div></div>
+  <div class="card"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>순위</th><th>이름</th><th>종합 점수</th><th>등급</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+}
+
+// ══════════════════════════════════════════
+//  ③ 센터원 PAGES
+// ══════════════════════════════════════════
+function pgStaffDashboard(){
+  const sid=S.user.staffId;
+  const perf=S.performances[sid]||{};
+  const agr=S.agreements[sid]||{};
+  const rev=S.reviews[sid]||{};
+  const ekey='stf_'+sid;
+  const score=calcScore(S.staffEvals[ekey]||{},S.staffKPIs,ekey);
+  const fg=getGrade(score);
+  const statusMap={draft:'작성 중',submitted:'제출 완료',agreed:'센터장 합의',rejected:'반려',confirmed:'본부장 확인'};
+  const stBadge=perf.status?`<span class="badge ${perf.status==='confirmed'?'b-blue':perf.status==='agreed'?'b-green':perf.status==='rejected'?'b-red':'b-pend'}">${statusMap[perf.status]||perf.status}</span>`:'<span class="badge b-gray">미제출</span>';
+  return`<div class="ph"><div class="ptitle">환영합니다, ${esc(S.user.name)}님!</div>
+  <div class="psub">센터원 대시보드 · 분기별 실적을 제출하고 본인의 순위를 확인할 수 있습니다</div></div>
+  <div style="background:white;border:1px solid #eee;border-radius:12px;padding:16px 18px;margin-bottom:18px">
+    <div style="font-size:12px;color:#888;margin-bottom:10px;font-weight:600">📌 실적 처리 현황</div>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      ${['제출','센터장 합의','본부장 확인'].map((step,i)=>{
+        const done=[['submitted','agreed','confirmed','rejected'],['agreed','confirmed'],['confirmed']][i];
+        const cur=[['submitted'],['agreed'],['confirmed']][i];
+        const isDone=done.includes(perf.status);
+        const isCur=cur.includes(perf.status);
+        return`${i>0?'<span style="color:#ddd;font-size:12px">→</span>':''}
+        <div style="display:flex;align-items:center;gap:4px;font-size:12px;color:${isCur?'#e91e8c':isDone?'#10b981':'#bbb'}">
+          <div style="width:20px;height:20px;border-radius:50%;border:2px solid currentColor;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700">${isDone?'✓':i+1}</div>
+          ${step}
+        </div>`;
+      }).join('')}
+    </div>
+    <div style="margin-top:10px;font-size:12px">${stBadge}</div>
+  </div>
+  <div class="qg3">
+    <div class="qc" onclick="go('my-submit')"><div class="qi ic-green">📋</div><h4>실적 제출</h4><p>분기별 실적 데이터 제출</p></div>
+    <div class="qc" onclick="go('my-rank')"><div class="qi ic-orange">📊</div><h4>내 순위</h4><p>내 평가 순위 확인</p></div>
+    <div class="sc" style="cursor:default"><div class="sn ${fg?'b-'+fg:''}" style="font-size:28px">${score!==null?score:'—'}<span style="font-size:14px;color:#aaa">${score!==null?'점':''}</span></div><div class="sl">내 종합 점수</div><span class="stag ${fg?'b-'+fg:'b-none'}">${fg||'미평가'}</span></div>
+  </div>
+  <div class="card"><div class="sh"><div class="stit">내 정보</div></div>
+  <div style="padding:14px 16px"><table class="info-tbl">
+    <tr><td>이름</td><td>${esc(S.user.name)}</td></tr>
+    <tr><td>이메일</td><td>${esc(S.user.email)}</td></tr>
+    <tr><td>직책</td><td>센터원</td></tr>
+    <tr><td>소속</td><td>${esc(getCenterName(S.user.centerId))}</td></tr>
+    <tr><td>가입일</td><td>${S.user.joinDate}</td></tr>
+  </table></div></div>`;
+}
+
+function pgMySubmit(){
+  const sid=S.user.staffId;
+  const perf=S.performances[sid]||{kpiData:{},status:'draft'};
+  const isSubmitted=['submitted','agreed','confirmed'].includes(perf.status);
+  const isRejected=perf.status==='rejected';
+  const statusInfo=isSubmitted&&!isRejected?`<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:8px;padding:10px 14px;font-size:12px;color:#065f46;margin-bottom:14px">✅ 제출 완료 (${perf.submittedAt}) — 현재 처리 중입니다</div>`:isRejected?`<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:8px;padding:10px 14px;font-size:12px;color:#991b1b;margin-bottom:14px">❌ 반려 처리 — 내용 수정 후 재제출하세요</div>`:'';
+  const kpiInputs=S.staffKPIs.map(k=>{
+    const d=perf.kpiData?.[k.id]||{};
+    return`<div class="perf-kpi">
+    <div class="perf-kpi-head"><div><div class="perf-kpi-title">${esc(k.name)}</div><div class="perf-kpi-meta">${esc(k.obj)} · 가중치 ${k.weight}%</div></div></div>
+    <div style="font-size:11px;color:#888;white-space:pre-line;margin-bottom:8px">${esc(k.criteria)}</div>
+    <div class="fg"><label class="fl">실적 내용 *</label>
+    <textarea class="fta" id="kpi_content_${k.id}" ${isSubmitted&&!isRejected?'disabled':''} placeholder="달성 내용을 구체적으로 입력하세요">${esc(d.content||'')}</textarea></div>
+    <div class="fg"><label class="fl">증빙 자료</label>
+    <input class="fi" id="kpi_ev_${k.id}" ${isSubmitted&&!isRejected?'disabled':''} placeholder="증빙 파일명 또는 URL" value="${esc(d.evidence||'')}"></div>
+    </div>`;
+  }).join('');
+  return`<div class="ph"><div class="ptitle">실적 제출</div><div class="psub">각 OKR 항목별 실적을 입력하고 제출합니다</div></div>
+  ${statusInfo}
+  ${kpiInputs}
+  ${!isSubmitted||isRejected?`<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:6px">
+    <button class="btn btn-gray" onclick="saveDraft(${sid})">임시 저장</button>
+    <button class="btn btn-pink" onclick="submitPerf(${sid})">📤 실적 제출</button>
+  </div>`:''}`;
+}
+function saveDraft(sid){
+  const kpiData={};
+  S.staffKPIs.forEach(k=>{kpiData[k.id]={content:g('kpi_content_'+k.id)?.value||'',evidence:g('kpi_ev_'+k.id)?.value||''};});
+  S.performances[sid]={...S.performances[sid]||{},kpiData,status:'draft'};
+  saveLocal();toast('임시 저장되었습니다','info');
+}
+function submitPerf(sid){
+  if(!confirm('실적을 제출하시겠습니까? 제출 후에는 센터장 합의 전까지 수정이 제한됩니다.'))return;
+  const kpiData={};
+  S.staffKPIs.forEach(k=>{kpiData[k.id]={content:g('kpi_content_'+k.id)?.value||'',evidence:g('kpi_ev_'+k.id)?.value||''};});
+  S.performances[sid]={kpiData,status:'submitted',submittedAt:new Date().toLocaleDateString('ko-KR')};
+  delete S.agreements[sid];
+  saveLocal();toast('실적이 제출되었습니다');render();
+}
+
+function pgMyRank(){
+  // 전체 순위 (익명 처리 - 본인만 이름 공개)
+  const sid=S.user.staffId;
+  const allApproved=S.staff.filter(s=>s.status==='approved');
+  const scored=allApproved.map(s=>{
+    const ekey='stf_'+s.id;
+    return{id:s.id,name:s.name,centerId:s.centerId,isMe:s.id===sid,
+      score:calcScore(S.staffEvals[ekey]||{},S.staffKPIs,ekey),
+      grade:getGrade(calcScore(S.staffEvals[ekey]||{},S.staffKPIs,ekey))};
+  }).sort((a,b)=>(b.score||0)-(a.score||0));
+
+  const myRank=scored.findIndex(s=>s.isMe)+1;
+  const me=scored.find(s=>s.isMe);
+
+  const rows=scored.map((s,i)=>{
+    const rank=i+1;
+    const isMe=s.isMe;
+    return`<tr class="${isMe?'own-row':''}">
+    <td><div class="rbox ${rank===1?'rk1':rank===2?'rk2':rank===3?'rk3':'rkn'}">${rank}</div></td>
+    <td>${isMe
+      ?`<div style="display:flex;align-items:center;gap:7px"><div class="av av-pk">${s.name[0]}</div><span style="font-weight:700;color:#e91e8c">${esc(s.name)} 👈 나</span></div>`
+      :`<div style="display:flex;align-items:center;gap:7px"><div class="av" style="background:#f3f4f6;color:#9ca3af">?</div><span style="color:#9ca3af">익 명</span></div>`
+    }</td>
+    <td style="font-size:11px;color:#888">${isMe?esc(getCenterName(s.centerId)):'—'}</td>
+    <td style="text-align:center;font-weight:${isMe?'700':'400'};color:${isMe?'#111':'#9ca3af'}">${isMe&&s.score!==null?s.score+'점':'•'}</td>
+    <td style="text-align:center"><span class="badge ${isMe&&s.grade?'b-'+s.grade:'b-none'}">${isMe&&s.grade?s.grade:'•'}</span></td>
+    </tr>`;
+  }).join('');
+
+  return`<div class="ph"><div class="ptitle">내 순위</div><div class="psub">전체 센터원 기준 나의 위치 (타인 정보는 익명 처리됩니다)</div></div>
+  <div style="background:linear-gradient(135deg,#fce7f3,white);border:1px solid #f9a8d4;border-radius:12px;padding:18px 20px;margin-bottom:16px;display:flex;align-items:center;gap:20px">
+    <div style="text-align:center;min-width:80px">
+      <div style="font-size:40px;font-weight:900;color:#e91e8c">${myRank}위</div>
+      <div style="font-size:11px;color:#888">전체 ${scored.length}명 중</div>
+    </div>
+    <div style="flex:1">
+      <div style="font-size:15px;font-weight:700;color:#111;margin-bottom:4px">${esc(S.user.name)}</div>
+      <div style="font-size:13px;color:#555;margin-bottom:8px">${esc(getCenterName(S.user.centerId))}</div>
+      <div style="display:flex;gap:10px">
+        <span style="font-size:22px;font-weight:700;color:#111">${me?.score!==null?me?.score+'점':'—'}</span>
+        <span class="badge ${me?.grade?'b-'+me?.grade:'b-none'}" style="font-size:14px;padding:5px 14px">${me?.grade||'미평가'}</span>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="sh"><div class="stit">전체 순위 (개인 정보 보호)</div><div class="ssub">본인 외 이름·점수·등급 비공개</div></div>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>순위</th><th>이름</th><th>소속</th><th>점수</th><th>등급</th></tr></thead><tbody>${rows}</tbody></table></div>
+  </div>`;
+}
+
+// ══════════════════════════════════════════
+//  INIT
+// ══════════════════════════════════════════
+setTimeout(()=>{
+  g('loadingScreen').classList.add('hide');
+  g('loginScreen').classList.add('show');
+}, 1200);
+</script>
+</body>
+</html>
