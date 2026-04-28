@@ -231,7 +231,7 @@ body{font-family:-apple-system,'Apple SD Gothic Neo','Noto Sans KR',sans-serif;b
   <div class="mw">
     <div class="topbar">
       <div class="tb-l"><div class="tb-dot"></div><span id="tbEmail">—</span></div>
-      <div style="font-size:11px;color:#aaa">2025년 하반기</div>
+      <div style="font-size:11px;color:#aaa">2026년 상반기</div>
     </div>
     <div class="content" id="content"></div>
   </div>
@@ -246,11 +246,11 @@ body{font-family:-apple-system,'Apple SD Gothic Neo','Noto Sans KR',sans-serif;b
 // ══════════════════════════════════════════
 //  SUPABASE (설정 전 데모 모드로 동작)
 // ══════════════════════════════════════════
-//const SUPABASE_URL  = 'https://wdbndirmgzvcshoioqet.supabase.co';   // ← 교체
-//const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndkYm5kaXJtZ3p2Y3Nob2lvcWV0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMzE2NzUsImV4cCI6MjA5MTYwNzY3NX0.HuWhoBPhcHZmGS2wFu8vWA402hu3n-OCA0KYVxC9CAQ';                  // ← 교체
+const SUPABASE_URL  = 'https://wdbndirmgzvcshoioqet.supabase.co';   // ← 교체
+const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndkYm5kaXJtZ3p2Y3Nob2lvcWV0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMzE2NzUsImV4cCI6MjA5MTYwNzY3NX0.HuWhoBPhcHZmGS2wFu8vWA402hu3n-OCA0KYVxC9CAQ';                  // ← 교체
 
-const SUPABASE_URL  = 'https://YOUR_PROJECT_ID.supabase.co';
-const SUPABASE_ANON = 'YOUR_ANON_PUBLIC_KEY';
+//const SUPABASE_URL  = 'https://YOUR_PROJECT_ID.supabase.co';
+//const SUPABASE_ANON = 'YOUR_ANON_PUBLIC_KEY';
 const DEMO_MODE = SUPABASE_URL.includes('YOUR_PROJECT_ID');
 let dbClient = DEMO_MODE ? null : window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
 
@@ -867,7 +867,7 @@ function pgFinalize(){
     <div style="width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;background:${ok?'#d1fae5':'#fee2e2'};color:${ok?'#065f46':'#991b1b'}">${ok?'✓':'!'}</div>
     <div style="flex:1"><span style="font-weight:600">${lbl}</span> <span style="font-size:11px;color:#888">${nt}</span></div>
     <span class="badge ${ok?'b-green':'b-orange'}">${ok?'완료':'미완료'}</span></div>`).join('');
-  return`<div class="ph"><div class="ptitle">분기 평가 완료 처리</div><div class="psub">2025년 하반기 평가를 최종 마감합니다</div></div>
+  return`<div class="ph"><div class="ptitle">분기 평가 완료 처리</div><div class="psub">2026년 상반기 평가를 최종 마감합니다</div></div>
   <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:16px">
     <div class="sc"><div class="sn" style="color:#3b82f6">${approved.length}</div><div class="sl">총 센터장 수</div></div>
     <div class="sc"><div class="sn" style="color:#10b981">${evalDone.length}</div><div class="sl">평가 완료</div></div>
@@ -883,7 +883,7 @@ function pgFinalize(){
   </div></div></div>`;
 }
 function exportResult(){
-  const lines=['서울6본부 OKR 평가 결과\n2025년 하반기\n\n이름\t센터\t규모\t종합점수\t등급\t규정위반\tLTI'];
+  const lines=['서울6본부 OKR 평가 결과\n2026년 상반기\n\n이름\t센터\t규모\t종합점수\t등급\t규정위반\tLTI'];
   S.managers.filter(m=>m.status==='approved').forEach(m=>{
     const ekey='mgr_'+m.id; const c=getCenter(m.centerId);
     const score=calcScore(S.mgrEvals[ekey]||{},S.mgrKPIs,ekey);
@@ -891,7 +891,7 @@ function exportResult(){
     lines.push([m.name,getCenterName(m.centerId),c?.scale==='large'?'대형':'중소형',score||'—',getGrade(score)||'—',sd.ruleVio||0,sd.ltiCount||0].join('\t'));
   });
   const blob=new Blob([lines.join('\n')],{type:'text/plain;charset=utf-8'});
-  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='서울6본부_OKR평가결과_2025하반기.txt';a.click();
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='서울6본부_OKR평가결과_2026상반기.txt';a.click();
 }
 
 function pgCenters(){
