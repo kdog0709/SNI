@@ -195,7 +195,6 @@ body{font-family:-apple-system,'Apple SD Gothic Neo','Noto Sans KR',sans-serif;b
     <div class="lfg"><label class="lfl">이메일</label><input class="lfi" id="loginEmail" type="email" placeholder="이메일 입력" autocomplete="email"></div>
     <div class="lfg"><label class="lfl">비밀번호</label><input class="lfi" id="loginPw" type="password" placeholder="비밀번호 입력" onkeydown="if(event.key==='Enter')doLogin()"></div>
     <button class="lbtn" id="loginBtn" onclick="doLogin()">로그인</button>
-    
   </div>
 </div>
 
@@ -601,6 +600,25 @@ function initDemoData(){
     if(saved){const p=JSON.parse(saved);if(p.mgrEvals)Object.assign(S.mgrEvals,p.mgrEvals);if(p.staffEvals)Object.assign(S.staffEvals,p.staffEvals);if(p.safetyData)Object.assign(S.safetyData,p.safetyData);if(p.performances)Object.assign(S.performances,p.performances);if(p.agreements)Object.assign(S.agreements,p.agreements);if(p.reviews)Object.assign(S.reviews,p.reviews);}
   }catch(e){}
 }
+// 센터원 ID로 최신 실적 조회 (분기 키 형식 대응)
+function getPerf(staffId){
+  const qtr=S.tab.submitQtr||getCurrentQuarter();
+  // 현재 분기 우선, 없으면 submitted/agreed 상태 중 최신 것
+  const qKey=staffId+'__'+qtr;
+  if(S.performances[qKey]) return S.performances[qKey];
+  // 해당 staffId의 모든 분기에서 가장 최신 제출된 것 찾기
+  const all=Object.entries(S.performances)
+    .filter(([k,v])=>k.startsWith(staffId+'__')||(v.staffId===staffId))
+    .map(([k,v])=>v)
+    .filter(v=>v&&v.status&&v.status!=='draft');
+  if(all.length) return all.sort((a,b)=>(b.submittedAt||'').localeCompare(a.submittedAt||''))[0];
+  // localStorage 하위호환 (구형 키)
+  if(S.performances[staffId]) return S.performances[staffId];
+  return {};
+}
+function getPerfStatus(staffId){
+  return getPerf(staffId)?.status||null;
+}
 function saveLocal(){ try{localStorage.setItem('okr_v3',JSON.stringify({mgrEvals:S.mgrEvals,staffEvals:S.staffEvals,safetyData:S.safetyData,performances:S.performances,agreements:S.agreements,reviews:S.reviews}));}catch(e){} }
 
 // ── DB 공통 헬퍼 ──
@@ -863,7 +881,7 @@ async function updateSafety(ekey,field,val){
 function pgAdminSubmissions(){
   const allStaff=S.staff.filter(s=>s.status==='approved');
   const rows=allStaff.map(s=>{
-    const perf=S.performances[s.id]||{};
+    const perf=getPerf(s.id);
     const agr=S.agreements[s.id]||{};
     const rev=S.reviews[s.id]||{};
     const statusBadge=perf.status==='agreed'?'<span class="badge b-green">합의 완료</span>':perf.status==='submitted'?'<span class="badge b-pend">제출됨</span>':perf.status==='rejected'?'<span class="badge b-red">반려</span>':perf.status==='confirmed'?'<span class="badge b-blue">본부장확인</span>':'<span class="badge b-gray">미제출</span>';
@@ -880,7 +898,7 @@ function pgAdminSubmissions(){
 
 function pgAdminReview(){
   const tab=S.tab.adminReview||'pending';
-  const agreed=S.staff.filter(s=>s.status==='approved'&&S.performances[s.id]?.status==='agreed');
+  const agreed=S.staff.filter(s=>s.status==='approved'&&getPerfStatus(s.id)==='agreed');
   const confirmed=S.staff.filter(s=>s.status==='approved'&&S.reviews[s.id]?.status==='confirmed');
   const list=tab==='pending'?agreed:confirmed;
   const rows=list.length?list.map(s=>{
@@ -915,7 +933,9 @@ function modalAdminReview(staffId){
 async function doAdminReview(staffId,status){
   const note=g('r_note')?.value||'',date=new Date().toLocaleDateString('ko-KR');
   S.reviews[staffId]={status,note,date};
-  if(status==='confirmed'&&S.performances[staffId]) S.performances[staffId].status='confirmed';
+  const _p=getPerf(staffId); if(status==='confirmed'&&_p) _p.status='confirmed';
+  const _qtr=_p?.quarter||getCurrentQuarter(); const _pk=staffId+'__'+_qtr;
+  if(status==='confirmed'&&S.performances[_pk]) S.performances[_pk].status='confirmed';
   saveLocal();
   await dbUpsert('reviews',{staff_id:staffId,status,note,date},'staff_id');
   if(status==='confirmed') await dbUpdate('performances',{status:'confirmed'},'staff_id',staffId);
@@ -1081,7 +1101,7 @@ async function saveCenter(id){
 async function delCenter(id){if(!confirm('삭제하시겠습니까?'))return;S.centers=S.centers.filter(c=>c.id!==id);await dbDelete('centers','id',id);toast('삭제','info');render();}
 function modalViewPerf(staffId){
   const s=S.staff.find(x=>x.id===staffId);
-  const perf=S.performances[staffId]||{};
+  const perf=getPerf(staffId);
   const agr=S.agreements[staffId]||{};
   const kpiRows=S.staffKPIs.map(k=>{const d=perf.kpiData?.[k.id]||{};return`<div style="border:1px solid #eee;border-radius:8px;padding:10px 12px;margin-bottom:8px"><div style="font-size:12px;font-weight:700;margin-bottom:4px">${esc(k.name)} <span style="font-weight:400;color:#aaa">(${k.weight}%)</span></div><div style="font-size:11px;color:#555">${esc(d.content||'(미입력)')}</div></div>`;}).join('');
   showModal(`<div class="mtitle">${esc(s.name)} 실적 내용</div>
@@ -1096,7 +1116,7 @@ function modalViewPerf(staffId){
 function pgMgrDashboard(){
   const cid=S.user.centerId;
   const myStaff=S.staff.filter(s=>s.centerId===cid);
-  const submitted=myStaff.filter(s=>S.performances[s.id]?.status==='submitted').length;
+  const submitted=myStaff.filter(s=>getPerfStatus(s.id)==='submitted').length;
   const pendingAppr=myStaff.filter(s=>s.status==='pending').length;
   const m=S.managers.find(x=>x.id===S.user.managerId);
   const myEkey=m?'mgr_'+m.id:'';
@@ -1180,12 +1200,12 @@ async function addStaffByMgr(){
 
 function pgAgreement(){
   const cid=S.user.centerId;
-  const submitted=S.staff.filter(s=>s.centerId===cid&&s.status==='approved'&&S.performances[s.id]?.status==='submitted');
-  const done=S.staff.filter(s=>s.centerId===cid&&s.status==='approved'&&['agreed','rejected'].includes(S.performances[s.id]?.status));
+  const submitted=S.staff.filter(s=>s.centerId===cid&&s.status==='approved'&&getPerfStatus(s.id)==='submitted');
+  const done=S.staff.filter(s=>s.centerId===cid&&s.status==='approved'&&['agreed','rejected'].includes(getPerfStatus(s.id)));
   const tab=S.tab.agrTab||'pending';
   const list=tab==='pending'?submitted:done;
   const rows=list.length?list.map(s=>{
-    const perf=S.performances[s.id]||{};
+    const perf=getPerf(s.id);
     const agr=S.agreements[s.id]||{};
     return`<tr><td><div style="display:flex;align-items:center;gap:7px"><div class="av av-pk">${s.name[0]}</div>${esc(s.name)}</div></td>
     <td style="font-size:11px;color:#888">${perf.submittedAt||'—'}</td>
@@ -1207,17 +1227,20 @@ function pgAgreement(){
   <div class="card"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>이름</th><th>제출일</th><th>상태</th><th>의견</th><th>처리</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
 }
 async function doAgree(staffId,status){
-  if(S.performances[staffId]) S.performances[staffId].status=status;
+  const p=getPerf(staffId); if(p) p.status=status;
+  const qtr=p?.quarter||getCurrentQuarter();
+  const perfKey=staffId+'__'+qtr;
+  if(S.performances[perfKey]) S.performances[perfKey].status=status;
   const date=new Date().toLocaleDateString('ko-KR');
   S.agreements[staffId]={status:status==='agreed'?'approved':'rejected',note:'',date,managerId:S.user.managerId};
   saveLocal();
   await dbUpsert('agreements',{staff_id:staffId,status:status==='agreed'?'approved':'rejected',note:'',date,manager_id:S.user.managerId||null},'staff_id');
-  if(S.performances[staffId]) await dbUpdate('performances',{status},'staff_id',staffId);
+  await dbUpdate('performances',{status},'staff_id',staffId);
   toast(status==='agreed'?'합의 완료':'반려 처리',status==='agreed'?'success':'warn');render();
 }
 function modalViewPerfMgr(staffId){
   const s=S.staff.find(x=>x.id===staffId);
-  const perf=S.performances[staffId]||{};
+  const perf=getPerf(staffId);
   const kpiRows=S.staffKPIs.map(k=>{const d=perf.kpiData?.[k.id]||{};return`<div style="border:1px solid #eee;border-radius:7px;padding:9px 11px;margin-bottom:7px"><div style="font-size:12px;font-weight:700;margin-bottom:3px">${esc(k.name)} <span style="font-weight:400;color:#aaa">(${k.weight}%)</span></div><div style="font-size:11px;color:#555">${esc(d.content||'(미입력)')}</div>${d.evidence?`<div style="font-size:10px;color:#888;margin-top:3px">📎 ${esc(d.evidence)}</div>`:''}</div>`;}).join('');
   showModal(`<div class="mtitle">${esc(s.name)} 실적 내용</div>
   <div style="font-size:11px;color:#888;margin-bottom:12px">제출일: ${perf.submittedAt||'—'}</div>
@@ -1228,12 +1251,15 @@ function modalViewPerfMgr(staffId){
   <button class="btn btn-green btn-sm" onclick="doAgreeWithNote(${staffId},'agreed')">✓ 합의</button></div>`);
 }
 async function doAgreeWithNote(staffId,status){
-  S.performances[staffId]={...S.performances[staffId]||{},status};
+  const p=getPerf(staffId); if(p) p.status=status;
+  const qtr=p?.quarter||getCurrentQuarter();
+  const perfKey=staffId+'__'+qtr;
+  if(S.performances[perfKey]) S.performances[perfKey].status=status;
   const note=g('agr_note')?.value||'',date=new Date().toLocaleDateString('ko-KR');
   S.agreements[staffId]={status:status==='agreed'?'approved':'rejected',note,date,managerId:S.user.managerId};
   saveLocal();
   await dbUpsert('agreements',{staff_id:staffId,status:status==='agreed'?'approved':'rejected',note,date,manager_id:S.user.managerId||null},'staff_id');
-  if(S.performances[staffId]) await dbUpdate('performances',{status},'staff_id',staffId);
+  await dbUpdate('performances',{status},'staff_id',staffId);
   toast(status==='agreed'?'합의 완료':'반려 처리',status==='agreed'?'success':'warn');closeModal();render();
 }
 
@@ -1241,7 +1267,7 @@ function pgMgrPerfStatus(){
   const cid=S.user.centerId;
   const myStaff=S.staff.filter(s=>s.centerId===cid&&s.status==='approved');
   const rows=myStaff.map(s=>{
-    const perf=S.performances[s.id]||{};
+    const perf=getPerf(s.id);
     const agr=S.agreements[s.id]||{};
     const stBadge=perf.status==='confirmed'?'<span class="badge b-blue">본부장확인</span>':perf.status==='agreed'?'<span class="badge b-green">합의완료</span>':perf.status==='submitted'?'<span class="badge b-pend">제출됨</span>':perf.status==='rejected'?'<span class="badge b-red">반려</span>':'<span class="badge b-gray">미제출</span>';
     return`<tr><td><div style="display:flex;align-items:center;gap:7px"><div class="av av-pk">${s.name[0]}</div>${esc(s.name)}</div></td>
@@ -1255,9 +1281,9 @@ function pgMgrPerfStatus(){
 
 function pgMgrReview(){
   const cid=S.user.centerId;
-  const agreed=S.staff.filter(s=>s.centerId===cid&&S.performances[s.id]?.status==='agreed');
+  const agreed=S.staff.filter(s=>s.centerId===cid&&s.status==='approved'&&getPerfStatus(s.id)==='agreed');
   const rows=agreed.length?agreed.map(s=>{
-    const perf=S.performances[s.id]||{};
+    const perf=getPerf(s.id);
     return`<tr><td><div style="display:flex;align-items:center;gap:7px"><div class="av av-pk">${s.name[0]}</div>${esc(s.name)}</div></td>
     <td style="font-size:11px;color:#888">${perf.submittedAt||'—'}</td>
     <td><button class="btn btn-outline btn-xs" onclick="modalViewPerfMgr(${s.id})">상세 보기</button></td></tr>`;
@@ -1331,7 +1357,7 @@ function pgCenterRank(){
 // ══════════════════════════════════════════
 function pgStaffDashboard(){
   const sid=S.user.staffId;
-  const perf=S.performances[sid]||{};
+  const perf=sid?getPerf(sid):{};
   const agr=S.agreements[sid]||{};
   const rev=S.reviews[sid]||{};
   const ekey='stf_'+sid;
