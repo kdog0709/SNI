@@ -539,7 +539,15 @@ async function loadFromSupabase(){
 
   S.performances={};
   const perfArr = await safe(()=>dbClient.from('performances').select('*'));
-  perfArr.forEach(p=>{ S.performances[p.staff_id]={status:p.status,submittedAt:p.submitted_at,kpiData:p.kpi_data||{}}; });
+  perfArr.forEach(p=>{
+    // key: staffId__quarter (분기별 구분)
+    const qtr=p.quarter||'2026년 상반기';
+    const perfKey=p.staff_id+'__'+qtr;
+    S.performances[perfKey]={status:p.status,submittedAt:p.submitted_at,kpiData:p.kpi_data||{},quarter:qtr,staffId:p.staff_id};
+    // 하위호환: 이전 staff_id 키도 유지
+    if(!S.performances[p.staff_id]||p.status==='submitted')
+      S.performances[p.staff_id]={status:p.status,submittedAt:p.submitted_at,kpiData:p.kpi_data||{},quarter:qtr};
+  });
 
   S.agreements={};
   const agrArr = await safe(()=>dbClient.from('agreements').select('*'));
@@ -1427,14 +1435,25 @@ function pgMySubmit(){
   </div>`:`<div style="text-align:center;padding:12px;color:#888;font-size:12px">제출 완료 — 센터장 합의 후 본부장이 최종 확인합니다</div>`}`;
 }
 
-function saveDraft(perfKey){
+async function saveDraft(perfKey){
   const parts=perfKey.split('__'); const sid=parseInt(parts[0]); const qtr=parts[1];
   const kpiData={};
   S.staffKPIs.forEach(k=>{kpiData[k.id]={content:g('kpi_content_'+k.id)?.value||'',evidence:g('kpi_ev_'+k.id)?.value||''};});
   S.performances[perfKey]={...S.performances[perfKey]||{},kpiData,status:'draft',quarter:qtr,staffId:sid};
-  saveLocal();toast('임시 저장되었습니다','info');
+  saveLocal();
+  // Supabase 저장
+  if(!DEMO_MODE && dbClient){
+    try{
+      await dbClient.from('performances').upsert({
+        staff_id:sid, quarter:qtr, kpi_data:kpiData,
+        status:'draft', submitted_at:null
+      },{onConflict:'staff_id,quarter'});
+    }catch(e){console.warn('performances 저장 오류:',e.message);}
+  }
+  toast('임시 저장되었습니다','info');
+  render(); // ← 즉시 화면 갱신 (진행률 업데이트)
 }
-function submitPerf(perfKey){
+async function submitPerf(perfKey){
   if(!confirm('실적을 제출하시겠습니까?\n제출 후에는 센터장 합의 전까지 수정이 제한됩니다.'))return;
   const parts=perfKey.split('__'); const sid=parseInt(parts[0]); const qtr=parts[1];
   const kpiData={};
@@ -1445,9 +1464,20 @@ function submitPerf(perfKey){
     if(v.trim())hasAny=true;
   });
   if(!hasAny){toast('최소 1개 항목 이상 실적을 입력해주세요','warn');return;}
-  S.performances[perfKey]={kpiData,status:'submitted',submittedAt:new Date().toLocaleDateString('ko-KR'),quarter:qtr,staffId:sid};
+  const submittedAt=new Date().toLocaleDateString('ko-KR');
+  S.performances[perfKey]={kpiData,status:'submitted',submittedAt,quarter:qtr,staffId:sid};
   delete S.agreements[sid];
-  saveLocal();toast(`${qtr} 실적이 제출되었습니다`);render();
+  saveLocal();
+  // Supabase 저장
+  if(!DEMO_MODE && dbClient){
+    try{
+      await dbClient.from('performances').upsert({
+        staff_id:sid, quarter:qtr, kpi_data:kpiData,
+        status:'submitted', submitted_at:submittedAt
+      },{onConflict:'staff_id,quarter'});
+    }catch(e){console.warn('performances 제출 저장 오류:',e.message);}
+  }
+  toast(`${qtr} 실적이 제출되었습니다`);render();
 }
 function pgMyRank(){
   // 전체 순위 (익명 처리 - 본인만 이름 공개)
