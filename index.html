@@ -503,43 +503,51 @@ async function doLogout(){
 // Supabase에서 데이터 로드 (없으면 시드 데이터로 폴백)
 async function loadFromSupabase(){
   if(!dbClient) return initDemoData();
-  try {
-    const [c,m,sf,mk,sk] = await Promise.all([
-      dbClient.from('centers').select('*').order('id'),
-      dbClient.from('managers').select('*').order('id'),
-      dbClient.from('staff').select('*').order('id'),
-      dbClient.from('mgr_kpis').select('*').order('id'),
-      dbClient.from('staff_kpis').select('*').order('id'),
-    ]);
-    S.centers   = (c.data&&c.data.length)   ? c.data.map(x=>({...x,centerId:x.id}))  : SEED.centers.map(x=>({...x}));
-    S.managers  = (m.data&&m.data.length)   ? m.data.map(x=>({...x,centerId:x.center_id||x.centerId})) : SEED.managers.map(x=>({...x}));
-    S.staff     = (sf.data&&sf.data.length) ? sf.data.map(x=>({...x,centerId:x.center_id||x.centerId})) : SEED.staff.map(x=>({...x}));
-    S.mgrKPIs   = (mk.data&&mk.data.length) ? mk.data  : SEED.mgrKPIs.map(x=>({...x}));
-    S.staffKPIs = (sk.data&&sk.data.length) ? sk.data  : SEED.staffKPIs.map(x=>({...x}));
 
-    const {data:evs} = await dbClient.from('evaluations').select('*').catch(()=>({data:[]}));
-    S.mgrEvals={}; S.staffEvals={};
-    (evs||[]).forEach(e=>{
-      const key=(e.evaluatee_type==='manager'?'mgr_':'stf_')+e.evaluatee_id;
-      if(e.evaluatee_type==='manager'){ if(!S.mgrEvals[key])S.mgrEvals[key]={}; S.mgrEvals[key]['kpi_'+e.kpi_id]=e.grade; }
-      else { if(!S.staffEvals[key])S.staffEvals[key]={}; S.staffEvals[key]['kpi_'+e.kpi_id]=e.grade; }
-    });
-    const {data:sfs} = await dbClient.from('safety_data').select('*').catch(()=>({data:[]}));
-    S.safetyData={};
-    (sfs||[]).forEach(s=>{ S.safetyData[s.ekey]={ruleVio:s.rule_vio||0,ltiCount:s.lti_count||0}; });
-    const {data:perfs} = await dbClient.from('performances').select('*').catch(()=>({data:[]}));
-    S.performances={};
-    (perfs||[]).forEach(p=>{ S.performances[p.staff_id]={status:p.status,submittedAt:p.submitted_at,kpiData:p.kpi_data||{}}; });
-    const {data:agrs} = await dbClient.from('agreements').select('*').catch(()=>({data:[]}));
-    S.agreements={};
-    (agrs||[]).forEach(a=>{ S.agreements[a.staff_id]={status:a.status,note:a.note,date:a.date,managerId:a.manager_id}; });
-    const {data:revs} = await dbClient.from('reviews').select('*').catch(()=>({data:[]}));
-    S.reviews={};
-    (revs||[]).forEach(r=>{ S.reviews[r.staff_id]={status:r.status,note:r.note,date:r.date}; });
-  } catch(e) {
-    console.warn('Supabase 로드 오류, 시드 데이터로 폴백:', e.message);
-    initDemoData();
-  }
+  // ── 각 테이블 개별 로드 (하나 실패해도 전체 폴백 없음) ──
+  const safe = async (fn) => { try { const r = await fn(); return r.data || []; } catch(e){ console.warn('테이블 로드 오류:', e.message); return []; } };
+
+  const [cArr,mArr,sfArr,mkArr,skArr] = await Promise.all([
+    safe(()=>dbClient.from('centers').select('*').order('id')),
+    safe(()=>dbClient.from('managers').select('*').order('id')),
+    safe(()=>dbClient.from('staff').select('*').order('id')),
+    safe(()=>dbClient.from('mgr_kpis').select('*').order('id')),
+    safe(()=>dbClient.from('staff_kpis').select('*').order('id')),
+  ]);
+
+  // DB에 데이터 있으면 DB 사용, 없으면 시드 폴백 (평가 데이터 제외)
+  S.centers   = cArr.length  ? cArr.map(x=>({...x,centerId:x.id}))                      : SEED.centers.map(x=>({...x}));
+  S.managers  = mArr.length  ? mArr.map(x=>({...x,centerId:x.center_id||x.centerId,joinDate:x.join_date||x.joinDate})) : SEED.managers.map(x=>({...x}));
+  S.staff     = sfArr.length ? sfArr.map(x=>({...x,centerId:x.center_id||x.centerId,joinDate:x.join_date||x.joinDate})) : SEED.staff.map(x=>({...x}));
+  S.mgrKPIs   = mkArr.length ? mkArr : SEED.mgrKPIs.map(x=>({...x}));
+  S.staffKPIs = skArr.length ? skArr : SEED.staffKPIs.map(x=>({...x}));
+
+  // ── 평가/실적 데이터 (테이블 없으면 빈 객체, initDemoData 호출 안 함) ──
+  S.mgrEvals={}; S.staffEvals={};
+  const evArr = await safe(()=>dbClient.from('evaluations').select('*'));
+  evArr.forEach(e=>{
+    const key=(e.evaluatee_type==='manager'?'mgr_':'stf_')+e.evaluatee_id;
+    if(e.evaluatee_type==='manager'){ if(!S.mgrEvals[key])S.mgrEvals[key]={}; S.mgrEvals[key]['kpi_'+e.kpi_id]=e.grade; }
+    else{ if(!S.staffEvals[key])S.staffEvals[key]={}; S.staffEvals[key]['kpi_'+e.kpi_id]=e.grade; }
+  });
+
+  S.safetyData={};
+  const sfDArr = await safe(()=>dbClient.from('safety_data').select('*'));
+  sfDArr.forEach(s=>{ S.safetyData[s.ekey]={ruleVio:s.rule_vio||0,ltiCount:s.lti_count||0}; });
+
+  S.performances={};
+  const perfArr = await safe(()=>dbClient.from('performances').select('*'));
+  perfArr.forEach(p=>{ S.performances[p.staff_id]={status:p.status,submittedAt:p.submitted_at,kpiData:p.kpi_data||{}}; });
+
+  S.agreements={};
+  const agrArr = await safe(()=>dbClient.from('agreements').select('*'));
+  agrArr.forEach(a=>{ S.agreements[a.staff_id]={status:a.status,note:a.note,date:a.date,managerId:a.manager_id}; });
+
+  S.reviews={};
+  const revArr = await safe(()=>dbClient.from('reviews').select('*'));
+  revArr.forEach(r=>{ S.reviews[r.staff_id]={status:r.status,note:r.note,date:r.date}; });
+
+  console.log(`✅ DB 로드 완료 | 센터:${S.centers.length} 센터장:${S.managers.length} 평가지표:${S.mgrKPIs.length}`);
 }
 
 function initDemoData(){
