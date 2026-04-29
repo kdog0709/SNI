@@ -246,11 +246,11 @@ body{font-family:-apple-system,'Apple SD Gothic Neo','Noto Sans KR',sans-serif;b
 // ══════════════════════════════════════════
 //  SUPABASE (설정 전 데모 모드로 동작)
 // ══════════════════════════════════════════
+//const SUPABASE_URL  = 'https://YOUR_PROJECT_ID.supabase.co';
+//const SUPABASE_ANON = 'YOUR_ANON_PUBLIC_KEY';
 const SUPABASE_URL  = 'https://wdbndirmgzvcshoioqet.supabase.co';   // ← 교체
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndkYm5kaXJtZ3p2Y3Nob2lvcWV0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMzE2NzUsImV4cCI6MjA5MTYwNzY3NX0.HuWhoBPhcHZmGS2wFu8vWA402hu3n-OCA0KYVxC9CAQ';                  // ← 교체
 
-//const SUPABASE_URL  = 'https://YOUR_PROJECT_ID.supabase.co';
-//const SUPABASE_ANON = 'YOUR_ANON_PUBLIC_KEY';
 const DEMO_MODE = SUPABASE_URL.includes('YOUR_PROJECT_ID');
 let dbClient = DEMO_MODE ? null : window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
 
@@ -428,12 +428,14 @@ function closeModal(){ g('modalBg').classList.remove('open'); }
 // ══════════════════════════════════════════
 function fillLogin(email, pw){ g('loginEmail').value=email; g('loginPw').value=pw; }
 
-function doLogin(){
+async function doLogin(){
   const email=g('loginEmail').value.trim(), pw=g('loginPw').value.trim();
   const err=g('loginErr'), btn=g('loginBtn');
   err.classList.remove('show');
   if(!email||!pw){err.textContent='이메일과 비밀번호를 입력하세요';err.classList.add('show');return;}
   btn.disabled=true; btn.textContent='로그인 중...';
+
+  // ── 데모 모드 ──
   if(DEMO_MODE){
     const u=DEMO_USERS[email];
     if(u&&u.pw===pw){
@@ -443,15 +445,101 @@ function doLogin(){
       err.textContent='이메일 또는 비밀번호가 올바르지 않습니다'; err.classList.add('show');
     }
     btn.disabled=false; btn.textContent='로그인';
+    return;
+  }
+
+  // ── Supabase 실제 로그인 ──
+  try {
+    const { data, error } = await dbClient.auth.signInWithPassword({ email, password: pw });
+    if(error) throw error;
+
+    // profiles 테이블에서 역할/이름 로드 (없으면 기본값)
+    let profile = null;
+    try {
+      const { data: pd } = await dbClient.from('profiles').select('*').eq('id', data.user.id).single();
+      profile = pd;
+    } catch(e) {}
+
+    // DEMO_USERS에 해당 이메일이 있으면 역할 정보 활용
+    const demoRef = DEMO_USERS[email] || {};
+    S.user = {
+      id: data.user.id,
+      email: data.user.email,
+      name: profile?.name || demoRef.name || data.user.email.split('@')[0],
+      role: profile?.role || demoRef.role || 'admin',
+      title: profile?.title || demoRef.title || '본부장',
+      org: profile?.org || demoRef.org || '서울6지역본부',
+      centerId: profile?.center_id || demoRef.centerId || null,
+      staffId: profile?.staff_id || demoRef.staffId || null,
+      managerId: profile?.manager_id || demoRef.managerId || null,
+      joinDate: profile?.join_date || demoRef.joinDate || '',
+    };
+
+    await loadFromSupabase();
+    showApp();
+  } catch(e) {
+    const msg = e.message || '';
+    if(msg.includes('Invalid login') || msg.includes('invalid_credentials') || msg.includes('Email not confirmed')) {
+      err.textContent = '이메일 또는 비밀번호가 올바르지 않습니다';
+    } else if(msg.includes('Email not confirmed')) {
+      err.textContent = '이메일 인증이 필요합니다. 가입 메일을 확인하세요.';
+    } else {
+      err.textContent = '로그인 오류: ' + msg;
+    }
+    err.classList.add('show');
+    btn.disabled=false; btn.textContent='로그인';
   }
 }
 
-function doLogout(){
+async function doLogout(){
   if(!confirm('로그아웃 하시겠습니까?')) return;
+  if(!DEMO_MODE && dbClient) await dbClient.auth.signOut();
   S.user=null;
   g('app').classList.remove('show');
   g('loginScreen').classList.add('show');
   toast('로그아웃 되었습니다','info');
+}
+
+// Supabase에서 데이터 로드 (없으면 시드 데이터로 폴백)
+async function loadFromSupabase(){
+  if(!dbClient) return initDemoData();
+  try {
+    const [c,m,sf,mk,sk] = await Promise.all([
+      dbClient.from('centers').select('*').order('id'),
+      dbClient.from('managers').select('*').order('id'),
+      dbClient.from('staff').select('*').order('id'),
+      dbClient.from('mgr_kpis').select('*').order('id'),
+      dbClient.from('staff_kpis').select('*').order('id'),
+    ]);
+    S.centers   = (c.data&&c.data.length)   ? c.data.map(x=>({...x,centerId:x.id}))  : SEED.centers.map(x=>({...x}));
+    S.managers  = (m.data&&m.data.length)   ? m.data.map(x=>({...x,centerId:x.center_id||x.centerId})) : SEED.managers.map(x=>({...x}));
+    S.staff     = (sf.data&&sf.data.length) ? sf.data.map(x=>({...x,centerId:x.center_id||x.centerId})) : SEED.staff.map(x=>({...x}));
+    S.mgrKPIs   = (mk.data&&mk.data.length) ? mk.data  : SEED.mgrKPIs.map(x=>({...x}));
+    S.staffKPIs = (sk.data&&sk.data.length) ? sk.data  : SEED.staffKPIs.map(x=>({...x}));
+
+    const {data:evs} = await dbClient.from('evaluations').select('*').catch(()=>({data:[]}));
+    S.mgrEvals={}; S.staffEvals={};
+    (evs||[]).forEach(e=>{
+      const key=(e.evaluatee_type==='manager'?'mgr_':'stf_')+e.evaluatee_id;
+      if(e.evaluatee_type==='manager'){ if(!S.mgrEvals[key])S.mgrEvals[key]={}; S.mgrEvals[key]['kpi_'+e.kpi_id]=e.grade; }
+      else { if(!S.staffEvals[key])S.staffEvals[key]={}; S.staffEvals[key]['kpi_'+e.kpi_id]=e.grade; }
+    });
+    const {data:sfs} = await dbClient.from('safety_data').select('*').catch(()=>({data:[]}));
+    S.safetyData={};
+    (sfs||[]).forEach(s=>{ S.safetyData[s.ekey]={ruleVio:s.rule_vio||0,ltiCount:s.lti_count||0}; });
+    const {data:perfs} = await dbClient.from('performances').select('*').catch(()=>({data:[]}));
+    S.performances={};
+    (perfs||[]).forEach(p=>{ S.performances[p.staff_id]={status:p.status,submittedAt:p.submitted_at,kpiData:p.kpi_data||{}}; });
+    const {data:agrs} = await dbClient.from('agreements').select('*').catch(()=>({data:[]}));
+    S.agreements={};
+    (agrs||[]).forEach(a=>{ S.agreements[a.staff_id]={status:a.status,note:a.note,date:a.date,managerId:a.manager_id}; });
+    const {data:revs} = await dbClient.from('reviews').select('*').catch(()=>({data:[]}));
+    S.reviews={};
+    (revs||[]).forEach(r=>{ S.reviews[r.staff_id]={status:r.status,note:r.note,date:r.date}; });
+  } catch(e) {
+    console.warn('Supabase 로드 오류, 시드 데이터로 폴백:', e.message);
+    initDemoData();
+  }
 }
 
 function initDemoData(){
@@ -1315,10 +1403,44 @@ function pgMyRank(){
 // ══════════════════════════════════════════
 //  INIT
 // ══════════════════════════════════════════
-setTimeout(()=>{
-  g('loadingScreen').classList.add('hide');
-  g('loginScreen').classList.add('show');
-}, 1200);
+async function init(){
+  if(DEMO_MODE){
+    // 데모 모드: 로딩 후 로그인 화면
+    setTimeout(()=>{ g('loadingScreen').classList.add('hide'); g('loginScreen').classList.add('show'); }, 1000);
+    return;
+  }
+  // Supabase 모드: 기존 세션 체크 (새로고침 시 자동 로그인 유지)
+  try {
+    const { data: { session } } = await dbClient.auth.getSession();
+    if(session && session.user){
+      let profile = null;
+      try { const {data:pd} = await dbClient.from('profiles').select('*').eq('id',session.user.id).single(); profile=pd; } catch(e){}
+      const demoRef = DEMO_USERS[session.user.email] || {};
+      S.user = {
+        id: session.user.id,
+        email: session.user.email,
+        name: profile?.name || demoRef.name || session.user.email.split('@')[0],
+        role: profile?.role || demoRef.role || 'admin',
+        title: profile?.title || demoRef.title || '본부장',
+        org: profile?.org || demoRef.org || '서울6지역본부',
+        centerId: profile?.center_id || demoRef.centerId || null,
+        staffId: profile?.staff_id || demoRef.staffId || null,
+        managerId: profile?.manager_id || demoRef.managerId || null,
+        joinDate: profile?.join_date || demoRef.joinDate || '',
+      };
+      await loadFromSupabase();
+      showApp();
+    } else {
+      g('loadingScreen').classList.add('hide');
+      g('loginScreen').classList.add('show');
+    }
+  } catch(e) {
+    console.error('init 오류:', e);
+    g('loadingScreen').classList.add('hide');
+    g('loginScreen').classList.add('show');
+  }
+}
+init();
 </script>
 </body>
 </html>
