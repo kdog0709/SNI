@@ -195,7 +195,7 @@ body{font-family:-apple-system,'Apple SD Gothic Neo','Noto Sans KR',sans-serif;b
     <div class="lfg"><label class="lfl">이메일</label><input class="lfi" id="loginEmail" type="email" placeholder="이메일 입력" autocomplete="email"></div>
     <div class="lfg"><label class="lfl">비밀번호</label><input class="lfi" id="loginPw" type="password" placeholder="비밀번호 입력" onkeydown="if(event.key==='Enter')doLogin()"></div>
     <button class="lbtn" id="loginBtn" onclick="doLogin()">로그인</button>
-    <!--<div class="ldemo">
+    <div class="ldemo">
       <strong>🔑 테스트 계정 — 클릭하면 자동 입력됩니다</strong>
       <div class="ldemo-row">
         <div class="ldemo-acc" onclick="fillLogin('admin@sni.co.kr','admin1234')">
@@ -209,7 +209,6 @@ body{font-family:-apple-system,'Apple SD Gothic Neo','Noto Sans KR',sans-serif;b
         </div>
       </div>
     </div>
-    -->
   </div>
 </div>
 
@@ -1319,46 +1318,135 @@ function pgStaffDashboard(){
   </table></div></div>`;
 }
 
-function pgMySubmit(){
-  const sid=S.user.staffId;
-  const perf=S.performances[sid]||{kpiData:{},status:'draft'};
-  const isSubmitted=['submitted','agreed','confirmed'].includes(perf.status);
-  const isRejected=perf.status==='rejected';
-  const statusInfo=isSubmitted&&!isRejected?`<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:8px;padding:10px 14px;font-size:12px;color:#065f46;margin-bottom:14px">✅ 제출 완료 (${perf.submittedAt}) — 현재 처리 중입니다</div>`:isRejected?`<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:8px;padding:10px 14px;font-size:12px;color:#991b1b;margin-bottom:14px">❌ 반려 처리 — 내용 수정 후 재제출하세요</div>`:'';
-  const kpiInputs=S.staffKPIs.map(k=>{
-    const d=perf.kpiData?.[k.id]||{};
-    return`<div class="perf-kpi">
-    <div class="perf-kpi-head"><div><div class="perf-kpi-title">${esc(k.name)}</div><div class="perf-kpi-meta">${esc(k.obj)} · 가중치 ${k.weight}%</div></div></div>
-    <div style="font-size:11px;color:#888;white-space:pre-line;margin-bottom:8px">${esc(k.criteria)}</div>
-    <div class="fg"><label class="fl">실적 내용 *</label>
-    <textarea class="fta" id="kpi_content_${k.id}" ${isSubmitted&&!isRejected?'disabled':''} placeholder="달성 내용을 구체적으로 입력하세요">${esc(d.content||'')}</textarea></div>
-    <div class="fg"><label class="fl">증빙 자료</label>
-    <input class="fi" id="kpi_ev_${k.id}" ${isSubmitted&&!isRejected?'disabled':''} placeholder="증빙 파일명 또는 URL" value="${esc(d.evidence||'')}"></div>
-    </div>`;
-  }).join('');
-  return`<div class="ph"><div class="ptitle">실적 제출</div><div class="psub">각 OKR 항목별 실적을 입력하고 제출합니다</div></div>
-  ${statusInfo}
-  ${kpiInputs}
-  ${!isSubmitted||isRejected?`<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:6px">
-    <button class="btn btn-gray" onclick="saveDraft(${sid})">임시 저장</button>
-    <button class="btn btn-pink" onclick="submitPerf(${sid})">📤 실적 제출</button>
-  </div>`:''}`;
+// 분기 목록 생성 (현재 연도 기준 ±1년, 상/하반기)
+function getQuarterOptions(){
+  const yr=new Date().getFullYear();
+  const opts=[];
+  [yr-1,yr,yr+1].forEach(y=>{
+    ['상반기','하반기'].forEach(h=>opts.push(`${y}년 ${h}`));
+  });
+  return opts;
 }
-function saveDraft(sid){
-  const kpiData={};
-  S.staffKPIs.forEach(k=>{kpiData[k.id]={content:g('kpi_content_'+k.id)?.value||'',evidence:g('kpi_ev_'+k.id)?.value||''};});
-  S.performances[sid]={...S.performances[sid]||{},kpiData,status:'draft'};
-  saveLocal();toast('임시 저장되었습니다','info');
-}
-function submitPerf(sid){
-  if(!confirm('실적을 제출하시겠습니까? 제출 후에는 센터장 합의 전까지 수정이 제한됩니다.'))return;
-  const kpiData={};
-  S.staffKPIs.forEach(k=>{kpiData[k.id]={content:g('kpi_content_'+k.id)?.value||'',evidence:g('kpi_ev_'+k.id)?.value||''};});
-  S.performances[sid]={kpiData,status:'submitted',submittedAt:new Date().toLocaleDateString('ko-KR')};
-  delete S.agreements[sid];
-  saveLocal();toast('실적이 제출되었습니다');render();
+// 현재 분기 자동 감지 (1~6월 = 상반기, 7~12월 = 하반기)
+function getCurrentQuarter(){
+  const now=new Date();
+  return `${now.getFullYear()}년 ${now.getMonth()<6?'상반기':'하반기'}`;
 }
 
+function pgMySubmit(){
+  const sid=S.user.staffId;
+  const qtr=S.tab.submitQtr||getCurrentQuarter();
+  S.tab.submitQtr=qtr;
+  const perfKey=sid+'__'+qtr;
+  const perf=S.performances[perfKey]||{kpiData:{},status:'draft',quarter:qtr};
+  const isSubmitted=['submitted','agreed','confirmed'].includes(perf.status);
+  const isRejected=perf.status==='rejected';
+
+  // 분기 선택 드롭다운
+  const qOpts=getQuarterOptions().map(q=>`<option value="${q}"${q===qtr?' selected':''}>${q}</option>`).join('');
+  const qSelect=`<div style="display:flex;align-items:center;gap:10px;margin-bottom:18px">
+    <label style="font-size:12px;font-weight:600;color:#555;white-space:nowrap">평가 분기</label>
+    <select class="fs" style="width:160px" onchange="S.tab.submitQtr=this.value;render()">${qOpts}</select>
+    <span class="badge ${isSubmitted?'b-green':isRejected?'b-red':'b-gray'}" style="font-size:11px">
+      ${isSubmitted?'✅ 제출완료':isRejected?'❌ 반려':perf.status==='draft'&&Object.keys(perf.kpiData||{}).length?'📝 임시저장':'미제출'}
+    </span>
+  </div>`;
+
+  // 상태 알림
+  const statusInfo=isSubmitted&&!isRejected
+    ?`<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:8px;padding:10px 14px;font-size:12px;color:#065f46;margin-bottom:14px">
+       ✅ <strong>${qtr}</strong> 실적 제출 완료 (${perf.submittedAt}) — 센터장 합의 대기 중입니다</div>`
+    :isRejected
+    ?`<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:8px;padding:10px 14px;font-size:12px;color:#991b1b;margin-bottom:14px">
+       ❌ 반려 처리 — 내용 수정 후 재제출하세요</div>`:'';
+
+  // 평가지표가 없는 경우
+  if(!S.staffKPIs||S.staffKPIs.length===0){
+    return`<div class="ph"><div class="ptitle">실적 제출</div><div class="psub">분기별 실적 데이터를 입력하고 제출합니다</div></div>
+    ${qSelect}
+    <div class="card"><div style="padding:60px 20px;text-align:center;color:#aaa">
+      <div style="font-size:40px;margin-bottom:12px">📋</div>
+      <div style="font-size:14px;font-weight:600;margin-bottom:6px">발행된 평가지표가 없습니다</div>
+      <div style="font-size:12px">본부장님이 평가지표를 발행하면 이곳에 표시됩니다.</div>
+    </div></div>`;
+  }
+
+  // KPI별 입력 폼
+  const disabled=isSubmitted&&!isRejected;
+  const kpiInputs=S.staffKPIs.map((k,idx)=>{
+    const d=perf.kpiData?.[k.id]||{};
+    const hasContent=!!(d.content);
+    return`<div class="perf-kpi" style="border-left:3px solid ${hasContent?'#10b981':'#e5e7eb'}">
+    <div class="perf-kpi-head">
+      <div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="width:22px;height:22px;border-radius:50%;background:${hasContent?'#d1fae5':'#f3f4f6'};color:${hasContent?'#065f46':'#9ca3af'};display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">${hasContent?'✓':idx+1}</span>
+          <div class="perf-kpi-title">${esc(k.name)}</div>
+          <span class="badge b-gray" style="font-size:10px">${esc(k.obj)}</span>
+          <span style="font-size:11px;color:#e91e8c;font-weight:600">${k.weight}%</span>
+        </div>
+        <div style="font-size:11px;color:#888;margin-top:6px;margin-left:30px;white-space:pre-line;line-height:1.6">${esc(k.criteria)}</div>
+      </div>
+    </div>
+    <div style="margin-left:30px;margin-top:10px">
+      <div class="fg">
+        <label class="fl">실적 내용 <span style="color:#e91e8c">*</span></label>
+        <textarea class="fta" id="kpi_content_${k.id}" ${disabled?'disabled':''} 
+          placeholder="달성 내용을 구체적으로 입력하세요 (수치 포함 권장)"
+          style="min-height:72px">${esc(d.content||'')}</textarea>
+      </div>
+      <div class="fg">
+        <label class="fl">증빙 자료 <span style="color:#aaa;font-weight:400">(선택)</span></label>
+        <input class="fi" id="kpi_ev_${k.id}" ${disabled?'disabled':''} 
+          placeholder="계약서, 보고서, URL 등 증빙 자료명" value="${esc(d.evidence||'')}">
+      </div>
+    </div>
+    </div>`;
+  }).join('');
+
+  // 진행률 계산
+  const filled=S.staffKPIs.filter(k=>(perf.kpiData?.[k.id]?.content||'').trim()).length;
+  const pct=Math.round(filled/S.staffKPIs.length*100);
+
+  return`<div class="ph"><div class="ptitle">실적 제출</div><div class="psub">분기별 OKR 항목별 실적을 입력하고 제출합니다</div></div>
+  ${qSelect}
+  ${statusInfo}
+  ${!disabled?`<div style="background:white;border:1px solid #eee;border-radius:10px;padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;gap:12px">
+    <div style="flex:1">
+      <div style="font-size:11px;color:#888;margin-bottom:5px">입력 진행률 (${filled}/${S.staffKPIs.length}항목)</div>
+      <div class="prog-track"><div class="prog-fill ${pct===100?'pG':pct>=50?'pY':'pR'}" style="width:${pct}%"></div></div>
+    </div>
+    <span style="font-size:18px;font-weight:700;color:${pct===100?'#10b981':pct>=50?'#f59e0b':'#9ca3af'}">${pct}%</span>
+  </div>`:''}
+  ${kpiInputs}
+  ${!disabled?`<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid #f0f0f0">
+    <button class="btn btn-gray" onclick="saveDraft('${perfKey}')">💾 임시 저장</button>
+    <button class="btn btn-pink" onclick="submitPerf('${perfKey}')" ${pct===0?'disabled':''}>📤 실적 제출</button>
+  </div>`:`<div style="text-align:center;padding:12px;color:#888;font-size:12px">제출 완료 — 센터장 합의 후 본부장이 최종 확인합니다</div>`}`;
+}
+
+function saveDraft(perfKey){
+  const parts=perfKey.split('__'); const sid=parseInt(parts[0]); const qtr=parts[1];
+  const kpiData={};
+  S.staffKPIs.forEach(k=>{kpiData[k.id]={content:g('kpi_content_'+k.id)?.value||'',evidence:g('kpi_ev_'+k.id)?.value||''};});
+  S.performances[perfKey]={...S.performances[perfKey]||{},kpiData,status:'draft',quarter:qtr,staffId:sid};
+  saveLocal();toast('임시 저장되었습니다','info');
+}
+function submitPerf(perfKey){
+  if(!confirm('실적을 제출하시겠습니까?\n제출 후에는 센터장 합의 전까지 수정이 제한됩니다.'))return;
+  const parts=perfKey.split('__'); const sid=parseInt(parts[0]); const qtr=parts[1];
+  const kpiData={};
+  let hasAny=false;
+  S.staffKPIs.forEach(k=>{
+    const v=g('kpi_content_'+k.id)?.value||'';
+    kpiData[k.id]={content:v,evidence:g('kpi_ev_'+k.id)?.value||''};
+    if(v.trim())hasAny=true;
+  });
+  if(!hasAny){toast('최소 1개 항목 이상 실적을 입력해주세요','warn');return;}
+  S.performances[perfKey]={kpiData,status:'submitted',submittedAt:new Date().toLocaleDateString('ko-KR'),quarter:qtr,staffId:sid};
+  delete S.agreements[sid];
+  saveLocal();toast(`${qtr} 실적이 제출되었습니다`);render();
+}
 function pgMyRank(){
   // 전체 순위 (익명 처리 - 본인만 이름 공개)
   const sid=S.user.staffId;
