@@ -195,22 +195,7 @@ body{font-family:-apple-system,'Apple SD Gothic Neo','Noto Sans KR',sans-serif;b
     <div class="lfg"><label class="lfl">이메일</label><input class="lfi" id="loginEmail" type="email" placeholder="이메일 입력" autocomplete="email"></div>
     <div class="lfg"><label class="lfl">비밀번호</label><input class="lfi" id="loginPw" type="password" placeholder="비밀번호 입력" onkeydown="if(event.key==='Enter')doLogin()"></div>
     <button class="lbtn" id="loginBtn" onclick="doLogin()">로그인</button>
-    <!--
-    <div class="ldemo">
-      <strong>🔑 테스트 계정 — 클릭하면 자동 입력됩니다</strong>
-      <div class="ldemo-row">
-        <div class="ldemo-acc" onclick="fillLogin('admin@sni.co.kr','admin1234')">
-          <div class="role">본부장</div><div class="nm">송덕수</div><div class="em">admin@sni.co.kr</div>
-        </div>
-        <div class="ldemo-acc" onclick="fillLogin('jdh@sni.co.kr','center1234')">
-          <div class="role">센터장</div><div class="nm">진대현</div><div class="em">jdh@sni.co.kr</div>
-        </div>
-        <div class="ldemo-acc" onclick="fillLogin('kms@sni.co.kr','staff1234')">
-          <div class="role">센터원</div><div class="nm">김민수</div><div class="em">kms@sni.co.kr</div>
-        </div>
-      </div>
-    </div>
-    -->
+    
   </div>
 </div>
 
@@ -618,6 +603,28 @@ function initDemoData(){
 }
 function saveLocal(){ try{localStorage.setItem('okr_v3',JSON.stringify({mgrEvals:S.mgrEvals,staffEvals:S.staffEvals,safetyData:S.safetyData,performances:S.performances,agreements:S.agreements,reviews:S.reviews}));}catch(e){} }
 
+// ── DB 공통 헬퍼 ──
+async function dbUpsert(table, data, conflict){
+  if(DEMO_MODE||!dbClient) return null;
+  try{ const {data:r,error}=await dbClient.from(table).upsert(data,conflict?{onConflict:conflict}:{}).select(); if(error)throw error; return r; }
+  catch(e){ console.warn(`[DB] ${table} upsert 오류:`,e.message); return null; }
+}
+async function dbInsert(table, data){
+  if(DEMO_MODE||!dbClient) return null;
+  try{ const {data:r,error}=await dbClient.from(table).insert(data).select(); if(error)throw error; return r?.[0]||null; }
+  catch(e){ console.warn(`[DB] ${table} insert 오류:`,e.message); return null; }
+}
+async function dbUpdate(table, data, col, val){
+  if(DEMO_MODE||!dbClient) return;
+  try{ const {error}=await dbClient.from(table).update(data).eq(col,val); if(error)throw error; }
+  catch(e){ console.warn(`[DB] ${table} update 오류:`,e.message); }
+}
+async function dbDelete(table, col, val){
+  if(DEMO_MODE||!dbClient) return;
+  try{ const {error}=await dbClient.from(table).delete().eq(col,val); if(error)throw error; }
+  catch(e){ console.warn(`[DB] ${table} delete 오류:`,e.message); }
+}
+
 function showApp(){
   g('loadingScreen').classList.add('hide');
   g('loginScreen').classList.remove('show');
@@ -654,7 +661,7 @@ function render(){
 // ══════════════════════════════════════════
 //  GRADE BUTTONS HANDLER
 // ══════════════════════════════════════════
-function setGrade(ekey, kpiId, grade, btn){
+async function setGrade(ekey, kpiId, grade, btn){
   const isStf=ekey.startsWith('stf_');
   if(isStf){if(!S.staffEvals[ekey])S.staffEvals[ekey]={};S.staffEvals[ekey]['kpi_'+kpiId]=grade;}
   else{if(!S.mgrEvals[ekey])S.mgrEvals[ekey]={};S.mgrEvals[ekey]['kpi_'+kpiId]=grade;}
@@ -662,6 +669,9 @@ function setGrade(ekey, kpiId, grade, btn){
   btn.className='gbtn g'+grade;
   updateScoreDisplay(ekey, isStf?S.staffKPIs:S.mgrKPIs);
   saveLocal();
+  // DB 저장
+  const parts=ekey.split('_'); const etype=isStf?'staff':'manager'; const eid=parseInt(parts[parts.length-1]);
+  await dbUpsert('evaluations',{evaluatee_type:etype,evaluatee_id:eid,kpi_id:kpiId,grade,year:2026,period:'상반기'},'evaluatee_type,evaluatee_id,kpi_id,year,period');
 }
 function updateScoreDisplay(ekey, kpis){
   const ev=ekey.startsWith('stf_')?S.staffEvals[ekey]:S.mgrEvals[ekey];
@@ -734,9 +744,9 @@ function pgMgrApproval(){
   </div>
   <div class="card"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>이름</th><th>센터</th><th>규모/유형</th><th>신청일</th><th>처리</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
 }
-function approveMgr(id){const m=S.managers.find(x=>x.id===id);if(m){m.status='approved';toast(m.name+' 센터장 승인');render();}}
-function rejectMgr(id){if(confirm('거절하시겠습니까?')){S.managers=S.managers.filter(x=>x.id!==id);toast('거절 처리','info');render();}}
-function revokeMgr(id){if(confirm('승인 취소하시겠습니까?')){const m=S.managers.find(x=>x.id===id);if(m){m.status='pending';render();}}}
+async function approveMgr(id){const m=S.managers.find(x=>x.id===id);if(m){m.status='approved';await dbUpdate('managers',{status:'approved'},'id',id);toast(m.name+' 센터장 승인');render();}}
+async function rejectMgr(id){if(confirm('거절하시겠습니까?')){S.managers=S.managers.filter(x=>x.id!==id);await dbDelete('managers','id',id);toast('거절 처리','info');render();}}
+async function revokeMgr(id){if(confirm('승인 취소하시겠습니까?')){const m=S.managers.find(x=>x.id===id);if(m){m.status='pending';await dbUpdate('managers',{status:'pending'},'id',id);render();}}}
 function modalAddMgr(){
   const opts=S.centers.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('');
   showModal(`<div class="mtitle">센터장 추가</div>
@@ -746,10 +756,12 @@ function modalAddMgr(){
   <div class="fg"><label class="fl">상태</label><select class="fs" id="m_st"><option value="pending">대기</option><option value="approved">승인</option></select></div></div>
   <div class="mfoot"><button class="btn btn-gray" onclick="closeModal()">취소</button><button class="btn btn-pink" onclick="saveMgr()">저장</button></div>`);
 }
-function saveMgr(){
+async function saveMgr(){
   const nm=g('m_nm')?.value?.trim(),em=g('m_em')?.value?.trim();
   if(!nm||!em)return alert('이름과 이메일을 입력하세요');
-  S.managers.push({id:Date.now(),name:nm,centerId:parseInt(g('m_cid')?.value),email:em,joinDate:g('m_dt')?.value,status:g('m_st')?.value});
+  const cid=parseInt(g('m_cid')?.value),jd=g('m_dt')?.value,st=g('m_st')?.value;
+  const r=await dbInsert('managers',{name:nm,center_id:cid,email:em,join_date:jd,status:st});
+  S.managers.push({id:r?.id||Date.now(),name:nm,centerId:cid,email:em,joinDate:jd,status:st});
   toast('추가되었습니다');closeModal();render();
 }
 
@@ -787,19 +799,28 @@ function modalEditKPI(type,id){
   <div class="fg"><label class="fl">비고</label><input class="fi" id="k_nt" value="${esc(k.note||'')}"></div>
   <div class="mfoot"><button class="btn btn-gray" onclick="closeModal()">취소</button><button class="btn btn-pink" onclick="saveKPI('${type}',${id})">저장</button></div>`);
 }
-function saveKPI(type,id){
+async function saveKPI(type,id){
   const obj=g('k_obj')?.value?.trim(),nm=g('k_nm')?.value?.trim(),w=parseInt(g('k_w')?.value)||0;
   if(!obj||!nm||!w)return alert('필수 항목을 입력하세요');
+  const tbl=type==='mgr'?'mgr_kpis':'staff_kpis';
   const kpis=type==='mgr'?S.mgrKPIs:S.staffKPIs;
   const data={obj,name:nm,weight:w,criteria:g('k_cr')?.value||'',note:g('k_nt')?.value||''};
-  if(id){const k=kpis.find(x=>x.id===id);if(k)Object.assign(k,data);}
-  else kpis.push({id:Date.now(),...data});
+  if(id){
+    const k=kpis.find(x=>x.id===id);if(k)Object.assign(k,data);
+    await dbUpdate(tbl,data,'id',id);
+  } else {
+    const r=await dbInsert(tbl,data);
+    const newId=r?.id||Date.now();
+    kpis.push({id:newId,...data});
+  }
   toast('저장되었습니다');closeModal();render();
 }
-function delKPI(type,id){
+async function delKPI(type,id){
   if(!confirm('삭제하시겠습니까?'))return;
+  const tbl=type==='mgr'?'mgr_kpis':'staff_kpis';
   if(type==='mgr')S.mgrKPIs=S.mgrKPIs.filter(k=>k.id!==id);
   else S.staffKPIs=S.staffKPIs.filter(k=>k.id!==id);
+  await dbDelete(tbl,'id',id);
   toast('삭제되었습니다','info');render();
 }
 
@@ -829,12 +850,14 @@ function pgMgrPerf(){
   <div class="card"><div class="sh"><div class="stit">센터장 평가표 (테스트 10건 포함)</div><button class="btn btn-outline btn-sm" onclick="window.print()">🖨️ 인쇄</button></div>
   <div class="tbl-wrap"><table class="tbl"><thead><tr><th>이름 / 센터</th><th>규모</th>${hdr}<th>규정위반</th><th>LTI건수</th><th>종합점수</th><th>등급</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
 }
-function updateSafety(ekey,field,val){
+async function updateSafety(ekey,field,val){
   if(!S.safetyData[ekey])S.safetyData[ekey]={ruleVio:0,ltiCount:0};
   S.safetyData[ekey][field]=parseInt(val)||0;
   const isStf=ekey.startsWith('stf_');
   updateScoreDisplay(ekey,isStf?S.staffKPIs:S.mgrKPIs);
   saveLocal();
+  const sd=S.safetyData[ekey];
+  await dbUpsert('safety_data',{ekey,rule_vio:sd.ruleVio||0,lti_count:sd.ltiCount||0},'ekey');
 }
 
 function pgAdminSubmissions(){
@@ -889,10 +912,14 @@ function modalAdminReview(staffId){
   <button class="btn btn-red btn-sm" onclick="doAdminReview(${staffId},'returned')">반려</button>
   <button class="btn btn-green btn-sm" onclick="doAdminReview(${staffId},'confirmed')">✓ 확인</button></div>`);
 }
-function doAdminReview(staffId,status){
-  S.reviews[staffId]={status,note:g('r_note')?.value||'',date:new Date().toLocaleDateString('ko-KR')};
-  if(status==='confirmed') S.performances[staffId].status='confirmed';
-  saveLocal(); toast(status==='confirmed'?'확인 처리되었습니다':'반려 처리되었습니다',status==='confirmed'?'success':'warn');
+async function doAdminReview(staffId,status){
+  const note=g('r_note')?.value||'',date=new Date().toLocaleDateString('ko-KR');
+  S.reviews[staffId]={status,note,date};
+  if(status==='confirmed'&&S.performances[staffId]) S.performances[staffId].status='confirmed';
+  saveLocal();
+  await dbUpsert('reviews',{staff_id:staffId,status,note,date},'staff_id');
+  if(status==='confirmed') await dbUpdate('performances',{status:'confirmed'},'staff_id',staffId);
+  toast(status==='confirmed'?'확인 처리되었습니다':'반려 처리되었습니다',status==='confirmed'?'success':'warn');
   closeModal();render();
 }
 
@@ -949,10 +976,12 @@ function modalAddStaff(){
   <div class="fg"><label class="fl">입사일</label><input class="fi" id="sf_dt" type="date" value="${new Date().toISOString().slice(0,10)}"></div></div>
   <div class="mfoot"><button class="btn btn-gray" onclick="closeModal()">취소</button><button class="btn btn-pink" onclick="addStaff()">저장</button></div>`);
 }
-function addStaff(){
+async function addStaff(){
   const nm=g('sf_nm')?.value?.trim(),em=g('sf_em')?.value?.trim();
   if(!nm||!em)return alert('이름과 이메일을 입력하세요');
-  S.staff.push({id:Date.now(),name:nm,email:em,centerId:parseInt(g('sf_cid')?.value),joinDate:g('sf_dt')?.value,status:'approved'});
+  const cid=parseInt(g('sf_cid')?.value),jd=g('sf_dt')?.value;
+  const r=await dbInsert('staff',{name:nm,email:em,center_id:cid,join_date:jd,status:'approved'});
+  S.staff.push({id:r?.id||Date.now(),name:nm,email:em,centerId:cid,joinDate:jd,status:'approved'});
   toast('추가되었습니다');closeModal();render();
 }
 
@@ -1037,13 +1066,19 @@ function editCenter(id){
   <div class="fg"><label class="fl">유형</label><select class="fs" id="c_tp"><option value="direct"${c.type==='direct'?' selected':''}>직할</option><option value="kam"${c.type==='kam'?' selected':''}>KAM</option></select></div></div>
   <div class="mfoot"><button class="btn btn-gray" onclick="closeModal()">취소</button><button class="btn btn-pink" onclick="saveCenter(${id})">저장</button></div>`);
 }
-function saveCenter(id){
+async function saveCenter(id){
   const nm=g('c_nm')?.value?.trim();if(!nm)return alert('센터명을 입력하세요');
-  if(id){const c=S.centers.find(x=>x.id===id);if(c)Object.assign(c,{name:nm,scale:g('c_sc')?.value,type:g('c_tp')?.value});}
-  else S.centers.push({id:Date.now(),name:nm,scale:g('c_sc')?.value,type:g('c_tp')?.value});
+  const sc=g('c_sc')?.value,tp=g('c_tp')?.value;
+  if(id){
+    const c=S.centers.find(x=>x.id===id);if(c)Object.assign(c,{name:nm,scale:sc,type:tp});
+    await dbUpdate('centers',{name:nm,scale:sc,type:tp},'id',id);
+  } else {
+    const r=await dbInsert('centers',{name:nm,scale:sc,type:tp});
+    S.centers.push({id:r?.id||Date.now(),name:nm,scale:sc,type:tp,centerId:r?.id||Date.now()});
+  }
   toast('저장되었습니다');closeModal();render();
 }
-function delCenter(id){if(!confirm('삭제하시겠습니까?'))return;S.centers=S.centers.filter(c=>c.id!==id);toast('삭제','info');render();}
+async function delCenter(id){if(!confirm('삭제하시겠습니까?'))return;S.centers=S.centers.filter(c=>c.id!==id);await dbDelete('centers','id',id);toast('삭제','info');render();}
 function modalViewPerf(staffId){
   const s=S.staff.find(x=>x.id===staffId);
   const perf=S.performances[staffId]||{};
@@ -1113,8 +1148,8 @@ function pgStaffApproval(){
   </div>
   <div class="card"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>이름</th><th>입사일</th><th>처리</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
 }
-function approveStaff(id){const s=S.staff.find(x=>x.id===id);if(s){s.status='approved';toast(s.name+' 승인');render();}}
-function rejectStaff(id){if(confirm('거절?')){S.staff=S.staff.filter(x=>x.id!==id);toast('거절','info');render();}}
+async function approveStaff(id){const s=S.staff.find(x=>x.id===id);if(s){s.status='approved';await dbUpdate('staff',{status:'approved'},'id',id);toast(s.name+' 승인');render();}}
+async function rejectStaff(id){if(confirm('거절?')){S.staff=S.staff.filter(x=>x.id!==id);await dbDelete('staff','id',id);toast('거절','info');render();}}
 
 function pgStaffManage(){
   const cid=S.user.centerId;
@@ -1134,10 +1169,12 @@ function modalAddStaffMgr(){
   <div class="fg"><label class="fl">입사일</label><input class="fi" id="sf_dt" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
   <div class="mfoot"><button class="btn btn-gray" onclick="closeModal()">취소</button><button class="btn btn-pink" onclick="addStaffByMgr()">저장</button></div>`);
 }
-function addStaffByMgr(){
+async function addStaffByMgr(){
   const nm=g('sf_nm')?.value?.trim(),em=g('sf_em')?.value?.trim();
   if(!nm||!em)return alert('필수 항목 입력');
-  S.staff.push({id:Date.now(),name:nm,email:em,centerId:S.user.centerId,joinDate:g('sf_dt')?.value,status:'approved'});
+  const cid=S.user.centerId,jd=g('sf_dt')?.value;
+  const r=await dbInsert('staff',{name:nm,email:em,center_id:cid,join_date:jd,status:'approved'});
+  S.staff.push({id:r?.id||Date.now(),name:nm,email:em,centerId:cid,joinDate:jd,status:'approved'});
   toast('추가');closeModal();render();
 }
 
@@ -1169,10 +1206,14 @@ function pgAgreement(){
   </div>
   <div class="card"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>이름</th><th>제출일</th><th>상태</th><th>의견</th><th>처리</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
 }
-function doAgree(staffId,status){
-  S.performances[staffId].status=status;
-  S.agreements[staffId]={status:status==='agreed'?'approved':'rejected',note:'',date:new Date().toLocaleDateString('ko-KR'),managerId:S.user.managerId};
-  saveLocal();toast(status==='agreed'?'합의 완료':'반려 처리',status==='agreed'?'success':'warn');render();
+async function doAgree(staffId,status){
+  if(S.performances[staffId]) S.performances[staffId].status=status;
+  const date=new Date().toLocaleDateString('ko-KR');
+  S.agreements[staffId]={status:status==='agreed'?'approved':'rejected',note:'',date,managerId:S.user.managerId};
+  saveLocal();
+  await dbUpsert('agreements',{staff_id:staffId,status:status==='agreed'?'approved':'rejected',note:'',date,manager_id:S.user.managerId||null},'staff_id');
+  if(S.performances[staffId]) await dbUpdate('performances',{status},'staff_id',staffId);
+  toast(status==='agreed'?'합의 완료':'반려 처리',status==='agreed'?'success':'warn');render();
 }
 function modalViewPerfMgr(staffId){
   const s=S.staff.find(x=>x.id===staffId);
@@ -1186,10 +1227,14 @@ function modalViewPerfMgr(staffId){
   <button class="btn btn-red btn-sm" onclick="doAgreeWithNote(${staffId},'rejected')">반려</button>
   <button class="btn btn-green btn-sm" onclick="doAgreeWithNote(${staffId},'agreed')">✓ 합의</button></div>`);
 }
-function doAgreeWithNote(staffId,status){
+async function doAgreeWithNote(staffId,status){
   S.performances[staffId]={...S.performances[staffId]||{},status};
-  S.agreements[staffId]={status:status==='agreed'?'approved':'rejected',note:g('agr_note')?.value||'',date:new Date().toLocaleDateString('ko-KR'),managerId:S.user.managerId};
-  saveLocal();toast(status==='agreed'?'합의 완료':'반려 처리',status==='agreed'?'success':'warn');closeModal();render();
+  const note=g('agr_note')?.value||'',date=new Date().toLocaleDateString('ko-KR');
+  S.agreements[staffId]={status:status==='agreed'?'approved':'rejected',note,date,managerId:S.user.managerId};
+  saveLocal();
+  await dbUpsert('agreements',{staff_id:staffId,status:status==='agreed'?'approved':'rejected',note,date,manager_id:S.user.managerId||null},'staff_id');
+  if(S.performances[staffId]) await dbUpdate('performances',{status},'staff_id',staffId);
+  toast(status==='agreed'?'합의 완료':'반려 처리',status==='agreed'?'success':'warn');closeModal();render();
 }
 
 function pgMgrPerfStatus(){
