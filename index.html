@@ -32,14 +32,7 @@ body{font-family:-apple-system,'Apple SD Gothic Neo','Noto Sans KR',sans-serif;b
 .lbtn{width:100%;padding:12px;background:linear-gradient(135deg,#f0187a,#a30d55);color:white;border:none;border-radius:9px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;margin-top:4px}
 .lbtn:hover{opacity:0.9}
 .lbtn:disabled{opacity:0.6;cursor:not-allowed}
-.ldemo{margin-top:14px;background:#f8f9fa;border-radius:9px;padding:12px 14px;font-size:11px;color:#555;line-height:1.8}
-.ldemo strong{color:#e91e8c;display:block;margin-bottom:2px;font-size:12px}
-.ldemo-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:8px}
-.ldemo-acc{background:white;border-radius:7px;padding:8px 10px;border:1px solid #eee;cursor:pointer;transition:border-color 0.15s}
-.ldemo-acc:hover{border-color:#e91e8c}
-.ldemo-acc .role{font-size:10px;color:#e91e8c;font-weight:700}
-.ldemo-acc .nm{font-size:12px;font-weight:700;color:#111}
-.ldemo-acc .em{font-size:10px;color:#888}
+
 #app{display:none;height:100vh}
 #app.show{display:flex}
 .sb{width:220px;min-width:220px;background:linear-gradient(175deg,#f0187a 0%,#c40f65 55%,#a30d55 100%);display:flex;flex-direction:column;overflow-y:auto}
@@ -109,6 +102,7 @@ body{font-family:-apple-system,'Apple SD Gothic Neo','Noto Sans KR',sans-serif;b
 .b-gray{background:#f3f4f6;color:#6b7280}.b-pink{background:#fce7f3;color:#9d174d}
 .b-orange{background:#ffedd5;color:#9a3412}.b-red{background:#fee2e2;color:#991b1b}
 .b-large{background:#dbeafe;color:#1e40af}.b-small{background:#f3f4f6;color:#374151}
+.b-pend{background:#ede9fe;color:#5b21b6}
 .gbrow{display:flex;gap:3px}
 .gbtn{width:30px;height:30px;border-radius:7px;border:1.5px solid #ddd;background:white;font-weight:700;font-size:11px;cursor:pointer;font-family:inherit;transition:all 0.1s;color:#ccc;padding:0}
 .gbtn:hover{border-color:#aaa;color:#333}
@@ -237,6 +231,7 @@ body{font-family:-apple-system,'Apple SD Gothic Neo','Noto Sans KR',sans-serif;b
 const SUPABASE_URL  = 'https://wdbndirmgzvcshoioqet.supabase.co';   // ← 교체
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndkYm5kaXJtZ3p2Y3Nob2lvcWV0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMzE2NzUsImV4cCI6MjA5MTYwNzY3NX0.HuWhoBPhcHZmGS2wFu8vWA402hu3n-OCA0KYVxC9CAQ';                  // ← 교체
 
+
 const DEMO_MODE = SUPABASE_URL.includes('YOUR_PROJECT_ID');
 let dbClient = DEMO_MODE ? null : window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
 
@@ -273,6 +268,7 @@ const NAV = {
     {id:'perf-status',icon:'👁',label:'실적 제출 현황'},
     {id:'staff-review',icon:'📝',label:'실적 검토'},
     {id:'staff-eval',icon:'📋',label:'센터원 평가'},
+    {id:'my-eval',icon:'🎯',label:'내 센터장 평가'},
     {id:'center-rank',icon:'📊',label:'센터원 순위 조회'},
   ],
   staff: [
@@ -544,60 +540,14 @@ async function loadFromSupabase(){
 }
 
 function initDemoData(){
+  // 구조 데이터만 로드 (샘플 평가 데이터 없음 - 실제 테스트용)
   S.centers   = SEED.centers.map(c=>({...c}));
   S.managers  = SEED.managers.map(m=>({...m}));
   S.staff     = SEED.staff.map(s=>({...s}));
   S.mgrKPIs   = SEED.mgrKPIs.map(k=>({...k}));
   S.staffKPIs = SEED.staffKPIs.map(k=>({...k}));
-
-  // ── 10개 테스트 평가 ──────────────────────────────────────
-  // 센터장 평가 (본부장이 입력한 grades)
-  // weights: kpi1=30%, kpi2=40%, kpi3=20%, kpi4=10%
-  // 테스트1: 이도윤(id1) S,S,A,S → 5*0.3+5*0.4+4*0.2+5*0.1=4.8 → 96점 S
-  S.mgrEvals['mgr_1']={kpi_1:'S',kpi_2:'S',kpi_3:'A',kpi_4:'S'};
-  // 테스트2: 김금철(id2) A,A,B,A → 3.8 → 76점 A
-  S.mgrEvals['mgr_2']={kpi_1:'A',kpi_2:'A',kpi_3:'B',kpi_4:'A'};
-  // 테스트3: 홍석기(id3) B,B,A,B → 3.2 → 64점 B
-  S.mgrEvals['mgr_3']={kpi_1:'B',kpi_2:'B',kpi_3:'A',kpi_4:'B'};
-  // 테스트4: 문준영(id4) A,S,B,A → 4.2 → 84점 A
-  S.mgrEvals['mgr_4']={kpi_1:'A',kpi_2:'S',kpi_3:'B',kpi_4:'A'};
-  // 테스트5: 이기용(id5) B,B,B,B → 3.0 → 60점 B
-  S.mgrEvals['mgr_5']={kpi_1:'B',kpi_2:'B',kpi_3:'B',kpi_4:'B'};
-  // 테스트6: 조호빈(id6) B,A,C,B → 0.9+1.6+0.4+0.3=3.2 → 64점 B
-  S.mgrEvals['mgr_6']={kpi_1:'B',kpi_2:'A',kpi_3:'C',kpi_4:'B'};
-  // 테스트7: 서현석(id7) A,A,B,A → 76점 - 규정위반3건(-6) = 70점 B ★감점테스트
-  S.mgrEvals['mgr_7']={kpi_1:'A',kpi_2:'A',kpi_3:'B',kpi_4:'A'};
-  S.safetyData['mgr_7']={ruleVio:3,ltiCount:0};
-  // 테스트8: 이재양(id8) B,B,A,B → 64점 - LTI2건(-10) = 54점 C ★감점테스트
-  S.mgrEvals['mgr_8']={kpi_1:'B',kpi_2:'B',kpi_3:'A',kpi_4:'B'};
-  S.safetyData['mgr_8']={ruleVio:0,ltiCount:2};
-  // 테스트9: 권형호(id9) A,S,B,A → 84점 A
-  S.mgrEvals['mgr_9']={kpi_1:'A',kpi_2:'S',kpi_3:'B',kpi_4:'A'};
-  // 테스트10: 윤홍기(id10) B,A,A,B → 0.9+1.6+0.8+0.3=3.6 → 72점 - 규정위반1(-2)+LTI1(-5) = 65점 B ★감점테스트
-  S.mgrEvals['mgr_10']={kpi_1:'B',kpi_2:'A',kpi_3:'A',kpi_4:'B'};
-  S.safetyData['mgr_10']={ruleVio:1,ltiCount:1};
-
-  // 센터원 샘플 평가 (센터장이 입력)
-  S.staffEvals['stf_1']={kpi_1:'A',kpi_2:'B',kpi_3:'S',kpi_4:'A',kpi_5:'B',kpi_6:'A',kpi_7:'B',kpi_8:'S',kpi_9:'A'};
-  S.staffEvals['stf_2']={kpi_1:'B',kpi_2:'A',kpi_3:'A',kpi_4:'B',kpi_5:'A',kpi_6:'B',kpi_7:'A',kpi_8:'A',kpi_9:'B'};
-  S.staffEvals['stf_3']={kpi_1:'S',kpi_2:'A',kpi_3:'B',kpi_4:'S',kpi_5:'A',kpi_6:'A',kpi_7:'S',kpi_8:'A',kpi_9:'A'};
-  S.staffEvals['stf_4']={kpi_1:'B',kpi_2:'B',kpi_3:'B',kpi_4:'A',kpi_5:'B',kpi_6:'B',kpi_7:'A',kpi_8:'B',kpi_9:'B'};
-  S.staffEvals['stf_5']={kpi_1:'C',kpi_2:'B',kpi_3:'B',kpi_4:'B',kpi_5:'C',kpi_6:'B',kpi_7:'B',kpi_8:'A',kpi_9:'B'};
-  S.staffEvals['stf_6']={kpi_1:'A',kpi_2:'A',kpi_3:'A',kpi_4:'A',kpi_5:'S',kpi_6:'A',kpi_7:'A',kpi_8:'B',kpi_9:'S'};
-  S.staffEvals['stf_7']={kpi_1:'B',kpi_2:'C',kpi_3:'B',kpi_4:'B',kpi_5:'B',kpi_6:'C',kpi_7:'B',kpi_8:'B',kpi_9:'B'};
-
-  // 샘플 실적 제출 (센터원이 제출한 데이터)
-  S.performances[1]={
-    kpiData:{1:{content:'GS타워 고객사 추가 용역 2건 수주 (7천만원)',evidence:'계약서 사본'},2:{content:'보고누락 0건 달성',evidence:'업무일지'},3:{content:'LTI 0건 달성',evidence:'안전일지'}},
-    status:'agreed', submittedAt:'2025-07-15', note:''
-  };
-  S.agreements[1]={status:'approved',note:'우수한 실적 확인',date:'2025-07-18',managerId:16};
-  S.reviews[1]={status:'confirmed',note:'이상 없음',date:'2025-07-20'};
-
-  try{
-    const saved=localStorage.getItem('okr_v3');
-    if(saved){const p=JSON.parse(saved);if(p.mgrEvals)Object.assign(S.mgrEvals,p.mgrEvals);if(p.staffEvals)Object.assign(S.staffEvals,p.staffEvals);if(p.safetyData)Object.assign(S.safetyData,p.safetyData);if(p.performances)Object.assign(S.performances,p.performances);if(p.agreements)Object.assign(S.agreements,p.agreements);if(p.reviews)Object.assign(S.reviews,p.reviews);}
-  }catch(e){}
+  S.mgrEvals={}; S.staffEvals={}; S.safetyData={};
+  S.performances={}; S.agreements={}; S.reviews={};
 }
 // 센터원 ID로 최신 실적 조회 (분기 키 형식 대응)
 function getPerf(staffId){
@@ -640,6 +590,15 @@ async function dbDelete(table, col, val){
   if(DEMO_MODE||!dbClient) return;
   try{ const {error}=await dbClient.from(table).delete().eq(col,val); if(error)throw error; }
   catch(e){ console.warn(`[DB] ${table} delete 오류:`,e.message); }
+}
+// 복수 조건 update (e.g. staff_id + quarter)
+async function dbUpdateWhere(table, data, conditions){
+  if(DEMO_MODE||!dbClient) return;
+  try{
+    let q=dbClient.from(table).update(data);
+    for(const [col,val] of Object.entries(conditions)) q=q.eq(col,val);
+    const {error}=await q; if(error) throw error;
+  }catch(e){ console.warn(`[DB] ${table} updateWhere 오류:`,e.message); }
 }
 
 function showApp(){
@@ -688,7 +647,8 @@ async function setGrade(ekey, kpiId, grade, btn){
   saveLocal();
   // DB 저장
   const parts=ekey.split('_'); const etype=isStf?'staff':'manager'; const eid=parseInt(parts[parts.length-1]);
-  await dbUpsert('evaluations',{evaluatee_type:etype,evaluatee_id:eid,kpi_id:kpiId,grade,year:2026,period:'상반기'},'evaluatee_type,evaluatee_id,kpi_id,year,period');
+  const _now=new Date(); const _yr=_now.getFullYear(); const _pd=_now.getMonth()<6?'상반기':'하반기';
+  await dbUpsert('evaluations',{evaluatee_type:etype,evaluatee_id:eid,kpi_id:kpiId,grade,year:_yr,period:_pd},'evaluatee_type,evaluatee_id,kpi_id,year,period');
 }
 function updateScoreDisplay(ekey, kpis){
   const ev=ekey.startsWith('stf_')?S.staffEvals[ekey]:S.mgrEvals[ekey];
@@ -937,7 +897,11 @@ async function doAdminReview(staffId,status){
   if(status==='confirmed'&&S.performances[_pk]) S.performances[_pk].status='confirmed';
   saveLocal();
   await dbUpsert('reviews',{staff_id:staffId,status,note,date},'staff_id');
-  if(status==='confirmed') await dbUpdate('performances',{status:'confirmed'},'staff_id',staffId);
+  if(status==='confirmed'){
+    const _qtr2=_p?.quarter||getCurrentQuarter();
+    if(_qtr2) await dbUpdateWhere('performances',{status:'confirmed'},{staff_id:staffId,quarter:_qtr2});
+    else await dbUpdate('performances',{status:'confirmed'},'staff_id',staffId);
+  }
   toast(status==='confirmed'?'확인 처리되었습니다':'반려 처리되었습니다',status==='confirmed'?'success':'warn');
   closeModal();render();
 }
@@ -1176,7 +1140,7 @@ function pgStaffManage(){
   const rows=list.length?list.map(s=>`<tr>
     <td><div style="display:flex;align-items:center;gap:7px"><div class="av av-pk">${s.name[0]}</div><span style="font-weight:600">${esc(s.name)}</span></div></td>
     <td style="font-size:11px;color:#888">${esc(s.email)}</td><td>${s.joinDate||'—'}</td>
-    <td><button class="btn btn-red btn-xs" onclick="if(confirm('삭제?')){S.staff=S.staff.filter(x=>x.id!==${s.id});render();}">삭제</button></td>
+    <td><button class="btn btn-red btn-xs" onclick="deleteStaffByMgr(${s.id})">삭제</button></td>
   </tr>`).join(''):`<tr><td colspan="4" class="empty">소속 센터원 없음</td></tr>`;
   return`<div class="ph"><div class="ptitle">센터원 관리</div><div class="psub">소속 센터원을 관리합니다</div></div>
   <div class="card"><div class="sh"><div class="stit">소속 센터원</div><button class="btn btn-pink btn-sm" onclick="modalAddStaffMgr()">+ 추가</button></div>
@@ -1195,6 +1159,12 @@ async function addStaffByMgr(){
   const r=await dbInsert('staff',{name:nm,email:em,center_id:cid,join_date:jd,status:'approved'});
   S.staff.push({id:r?.id||Date.now(),name:nm,email:em,centerId:cid,joinDate:jd,status:'approved'});
   toast('추가');closeModal();render();
+}
+async function deleteStaffByMgr(id){
+  if(!confirm('센터원을 삭제하시겠습니까?')) return;
+  S.staff=S.staff.filter(x=>x.id!==id);
+  await dbDelete('staff','id',id);
+  toast('삭제되었습니다','info'); render();
 }
 
 function pgAgreement(){
@@ -1234,7 +1204,8 @@ async function doAgree(staffId,status){
   S.agreements[staffId]={status:status==='agreed'?'approved':'rejected',note:'',date,managerId:S.user.managerId};
   saveLocal();
   await dbUpsert('agreements',{staff_id:staffId,status:status==='agreed'?'approved':'rejected',note:'',date,manager_id:S.user.managerId||null},'staff_id');
-  await dbUpdate('performances',{status},'staff_id',staffId);
+  if(qtr) await dbUpdateWhere('performances',{status},{staff_id:staffId,quarter:qtr});
+  else await dbUpdate('performances',{status},'staff_id',staffId);
   toast(status==='agreed'?'합의 완료':'반려 처리',status==='agreed'?'success':'warn');render();
 }
 function modalViewPerfMgr(staffId){
@@ -1258,7 +1229,8 @@ async function doAgreeWithNote(staffId,status){
   S.agreements[staffId]={status:status==='agreed'?'approved':'rejected',note,date,managerId:S.user.managerId};
   saveLocal();
   await dbUpsert('agreements',{staff_id:staffId,status:status==='agreed'?'approved':'rejected',note,date,manager_id:S.user.managerId||null},'staff_id');
-  await dbUpdate('performances',{status},'staff_id',staffId);
+  if(qtr) await dbUpdateWhere('performances',{status},{staff_id:staffId,quarter:qtr});
+  else await dbUpdate('performances',{status},'staff_id',staffId);
   toast(status==='agreed'?'합의 완료':'반려 처리',status==='agreed'?'success':'warn');closeModal();render();
 }
 
@@ -1309,8 +1281,14 @@ function pgStaffEval(){
 }
 
 function pgMyEval(){
-  const m=S.managers.find(x=>x.id===S.user.managerId);
-  if(!m) return`<div class="empty">센터장 정보를 찾을 수 없습니다</div>`;
+  // managerId 우선, 없으면 centerId로 매칭
+  let m=S.managers.find(x=>x.id===S.user.managerId);
+  if(!m&&S.user.centerId) m=S.managers.find(x=>(x.centerId||x.center_id)===S.user.centerId&&x.status==='approved');
+  if(!m) return`<div class="card"><div style="padding:48px;text-align:center;color:#aaa">
+    <div style="font-size:32px;margin-bottom:12px">🎯</div>
+    <div style="font-size:14px;font-weight:600;margin-bottom:6px">평가 정보를 찾을 수 없습니다</div>
+    <div style="font-size:12px">본부장이 센터장 평가를 입력하면 이곳에 표시됩니다.<br>profiles 테이블의 manager_id 값을 확인해 주세요.</div>
+  </div></div>`;
   const ekey='mgr_'+m.id; const ev=S.mgrEvals[ekey]||{};
   const score=calcScore(ev,S.mgrKPIs,ekey); const fg=getGrade(score);
   const sd=S.safetyData[ekey]||{ruleVio:0,ltiCount:0};
