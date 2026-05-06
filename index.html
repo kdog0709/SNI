@@ -520,13 +520,14 @@ async function loadFromSupabase(){
   S.performances={};
   const perfArr = await safe(()=>dbClient.from('performances').select('*'));
   perfArr.forEach(p=>{
-    // key: staffId__quarter (분기별 구분)
-    const qtr=p.quarter||'2026년 상반기';
-    const perfKey=p.staff_id+'__'+qtr;
-    S.performances[perfKey]={status:p.status,submittedAt:p.submitted_at,kpiData:p.kpi_data||{},quarter:qtr,staffId:p.staff_id};
-    // 하위호환: 이전 staff_id 키도 유지
-    if(!S.performances[p.staff_id]||p.status==='submitted')
-      S.performances[p.staff_id]={status:p.status,submittedAt:p.submitted_at,kpiData:p.kpi_data||{},quarter:qtr};
+    const qtr=p.quarter||getCurrentQuarter();
+    const sid=parseInt(p.staff_id)||p.staff_id; // 숫자 통일
+    const perfKey=sid+'__'+qtr;
+    const perfObj={status:p.status,submittedAt:p.submitted_at,kpiData:p.kpi_data||{},quarter:qtr,staffId:sid};
+    S.performances[perfKey]=perfObj;
+    // 숫자/문자열 키 모두 등록
+    S.performances[String(sid)+'__'+qtr]=perfObj;
+    if(!S.performances[sid]||p.status==='submitted') S.performances[sid]=perfObj;
   });
 
   S.agreements={};
@@ -552,17 +553,23 @@ function initDemoData(){
 }
 // 센터원 ID로 최신 실적 조회 (분기 키 형식 대응)
 function getPerf(staffId){
+  if(!staffId) return {};
+  const id=parseInt(staffId)||staffId; // 숫자/문자열 통일
   const qtr=S.tab.submitQtr||getCurrentQuarter();
-  // 현재 분기 우선, 없으면 submitted/agreed 상태 중 최신 것
-  const qKey=staffId+'__'+qtr;
+  // 현재 분기 우선
+  const qKey=id+'__'+qtr;
   if(S.performances[qKey]) return S.performances[qKey];
+  // 문자열 키로도 시도
+  const qKeyStr=String(staffId)+'__'+qtr;
+  if(S.performances[qKeyStr]) return S.performances[qKeyStr];
   // 해당 staffId의 모든 분기에서 가장 최신 제출된 것 찾기
   const all=Object.entries(S.performances)
-    .filter(([k,v])=>k.startsWith(staffId+'__')||(v.staffId===staffId))
+    .filter(([k,v])=>k.startsWith(id+'__')||k.startsWith(String(staffId)+'__')||(parseInt(v.staffId)===id))
     .map(([k,v])=>v)
     .filter(v=>v&&v.status&&v.status!=='draft');
   if(all.length) return all.sort((a,b)=>(b.submittedAt||'').localeCompare(a.submittedAt||''))[0];
-  // localStorage 하위호환 (구형 키)
+  // 하위호환
+  if(S.performances[id]) return S.performances[id];
   if(S.performances[staffId]) return S.performances[staffId];
   return {};
 }
@@ -602,7 +609,7 @@ async function dbUpdateWhere(table, data, conditions){
   }catch(e){ console.warn(`[DB] ${table} updateWhere 오류:`,e.message); }
 }
 
-function showApp(){
+async function showApp(){
   g('loadingScreen').classList.add('hide');
   g('loginScreen').classList.remove('show');
   g('app').classList.add('show');
@@ -610,6 +617,15 @@ function showApp(){
   g('sbName').textContent=S.user.name||'—';
   g('sbOrg').textContent=S.user.org||'—';
   g('tbEmail').textContent=S.user.email||'—';
+  // staffId/managerId null 방어: email로 staff/manager 테이블에서 ID 자동 보정
+  if(S.user.role==='staff' && !S.user.staffId){
+    const found=S.staff.find(s=>s.email===S.user.email);
+    if(found){ S.user.staffId=found.id; console.log('staffId 자동 보정:',found.id); }
+  }
+  if(S.user.role==='manager' && !S.user.managerId){
+    const found=S.managers.find(m=>m.email===S.user.email);
+    if(found){ S.user.managerId=found.id; S.user.centerId=found.centerId||found.center_id; console.log('managerId 자동 보정:',found.id); }
+  }
   buildNav(); render();
 }
 
@@ -1357,7 +1373,8 @@ function pgCenterRank(){
 //  ③ 센터원 PAGES
 // ══════════════════════════════════════════
 function pgStaffDashboard(){
-  const sid=S.user.staffId;
+  let sid=S.user.staffId;
+  if(!sid){ const f=S.staff.find(s=>s.email===S.user.email); if(f){sid=f.id;S.user.staffId=f.id;} }
   const perf=sid?getPerf(sid):{};
   const agr=S.agreements[sid]||{};
   const rev=S.reviews[sid]||{};
@@ -1416,7 +1433,14 @@ function getCurrentQuarter(){
 }
 
 function pgMySubmit(){
-  const sid=S.user.staffId;
+  // staffId null 방어
+  let sid=S.user.staffId;
+  if(!sid){ const f=S.staff.find(s=>s.email===S.user.email); if(f){sid=f.id;S.user.staffId=f.id;} }
+  if(!sid) return`<div class="card"><div style="padding:48px;text-align:center;color:#aaa">
+    <div style="font-size:32px;margin-bottom:12px">⚠️</div>
+    <div style="font-size:14px;font-weight:600;margin-bottom:6px">센터원 정보를 찾을 수 없습니다</div>
+    <div style="font-size:12px">관리자에게 문의하세요. (profiles.staff_id 미설정)</div>
+  </div></div>`;
   const qtr=S.tab.submitQtr||getCurrentQuarter();
   S.tab.submitQtr=qtr;
   const perfKey=sid+'__'+qtr;
@@ -1553,7 +1577,8 @@ async function submitPerf(perfKey){
 }
 function pgMyRank(){
   // 전체 순위 (익명 처리 - 본인만 이름 공개)
-  const sid=S.user.staffId;
+  let sid=S.user.staffId;
+  if(!sid){ const f=S.staff.find(s=>s.email===S.user.email); if(f){sid=f.id;S.user.staffId=f.id;} }
   const allApproved=S.staff.filter(s=>s.status==='approved');
   const scored=allApproved.map(s=>{
     const ekey='stf_'+s.id;
