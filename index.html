@@ -497,9 +497,10 @@ async function loadFromSupabase(){
   ]);
 
   // DB에 데이터 있으면 DB 사용, 없으면 시드 폴백 (평가 데이터 제외)
-  S.centers   = cArr.length  ? cArr.map(x=>({...x,centerId:x.id}))                      : SEED.centers.map(x=>({...x}));
+  // ★ DB 데이터 우선, 없으면 구조 시드만 (평가 데이터 시드 제거)
+  S.centers   = cArr.length  ? cArr.map(x=>({...x,centerId:x.id})) : SEED.centers.map(x=>({...x}));
   S.managers  = mArr.length  ? mArr.map(x=>({...x,centerId:x.center_id||x.centerId,joinDate:x.join_date||x.joinDate})) : SEED.managers.map(x=>({...x}));
-  S.staff     = sfArr.length ? sfArr.map(x=>({...x,centerId:x.center_id||x.centerId,joinDate:x.join_date||x.joinDate})) : SEED.staff.map(x=>({...x}));
+  S.staff     = sfArr.map(x=>({...x,centerId:x.center_id||x.centerId,joinDate:x.join_date||x.joinDate})); // ★ 시드 폴백 없음 - DB 그대로
   S.mgrKPIs   = mkArr.length ? mkArr : SEED.mgrKPIs.map(x=>({...x}));
   S.staffKPIs = skArr.length ? skArr : SEED.staffKPIs.map(x=>({...x}));
 
@@ -574,22 +575,22 @@ function saveLocal(){ try{localStorage.setItem('okr_v3',JSON.stringify({mgrEvals
 async function dbUpsert(table, data, conflict){
   if(DEMO_MODE||!dbClient) return null;
   try{ const {data:r,error}=await dbClient.from(table).upsert(data,conflict?{onConflict:conflict}:{}).select(); if(error)throw error; return r; }
-  catch(e){ console.warn(`[DB] ${table} upsert 오류:`,e.message); return null; }
+  catch(e){ console.error(`[DB] ${table} upsert 오류:`,e.message); toast(`저장 오류: ${e.message}`,'error'); return null; }
 }
 async function dbInsert(table, data){
   if(DEMO_MODE||!dbClient) return null;
   try{ const {data:r,error}=await dbClient.from(table).insert(data).select(); if(error)throw error; return r?.[0]||null; }
-  catch(e){ console.warn(`[DB] ${table} insert 오류:`,e.message); return null; }
+  catch(e){ console.error(`[DB] ${table} insert 오류:`,e.message); toast(`저장 오류: ${e.message}`,'error'); return null; }
 }
 async function dbUpdate(table, data, col, val){
   if(DEMO_MODE||!dbClient) return;
   try{ const {error}=await dbClient.from(table).update(data).eq(col,val); if(error)throw error; }
-  catch(e){ console.warn(`[DB] ${table} update 오류:`,e.message); }
+  catch(e){ console.error(`[DB] ${table} update 오류:`,e.message); toast(`업데이트 오류: ${e.message}`,'error'); }
 }
 async function dbDelete(table, col, val){
   if(DEMO_MODE||!dbClient) return;
   try{ const {error}=await dbClient.from(table).delete().eq(col,val); if(error)throw error; }
-  catch(e){ console.warn(`[DB] ${table} delete 오류:`,e.message); }
+  catch(e){ console.error(`[DB] ${table} delete 오류:`,e.message); toast(`삭제 오류: ${e.message}`,'error'); }
 }
 // 복수 조건 update (e.g. staff_id + quarter)
 async function dbUpdateWhere(table, data, conditions){
@@ -737,9 +738,14 @@ async function saveMgr(){
   const nm=g('m_nm')?.value?.trim(),em=g('m_em')?.value?.trim();
   if(!nm||!em)return alert('이름과 이메일을 입력하세요');
   const cid=parseInt(g('m_cid')?.value),jd=g('m_dt')?.value,st=g('m_st')?.value;
-  const r=await dbInsert('managers',{name:nm,center_id:cid,email:em,join_date:jd,status:st});
-  S.managers.push({id:r?.id||Date.now(),name:nm,centerId:cid,email:em,joinDate:jd,status:st});
-  toast('추가되었습니다');closeModal();render();
+  if(!DEMO_MODE && dbClient){
+    const r=await dbInsert('managers',{name:nm,center_id:cid,email:em,join_date:jd,status:st});
+    if(!r){ return; }
+    S.managers.push({id:r.id,name:nm,centerId:cid,email:em,joinDate:jd,status:st});
+  } else {
+    S.managers.push({id:Date.now(),name:nm,centerId:cid,email:em,joinDate:jd,status:st});
+  }
+  toast(nm+' 센터장이 추가되었습니다');closeModal();render();
 }
 
 function pgMgrKPI(){ return kpiMgmtPage('mgr','센터장','b-blue'); }
@@ -963,9 +969,14 @@ async function addStaff(){
   const nm=g('sf_nm')?.value?.trim(),em=g('sf_em')?.value?.trim();
   if(!nm||!em)return alert('이름과 이메일을 입력하세요');
   const cid=parseInt(g('sf_cid')?.value),jd=g('sf_dt')?.value;
-  const r=await dbInsert('staff',{name:nm,email:em,center_id:cid,join_date:jd,status:'approved'});
-  S.staff.push({id:r?.id||Date.now(),name:nm,email:em,centerId:cid,joinDate:jd,status:'approved'});
-  toast('추가되었습니다');closeModal();render();
+  if(!DEMO_MODE && dbClient){
+    const r=await dbInsert('staff',{name:nm,email:em,center_id:cid,join_date:jd,status:'approved'});
+    if(!r){ return; }
+    S.staff.push({id:r.id,name:nm,email:em,centerId:cid,joinDate:jd,status:'approved'});
+  } else {
+    S.staff.push({id:Date.now(),name:nm,email:em,centerId:cid,joinDate:jd,status:'approved'});
+  }
+  toast(nm+' 센터원이 추가되었습니다');closeModal();render();
 }
 
 function pgFinalize(){
@@ -1056,8 +1067,14 @@ async function saveCenter(id){
     const c=S.centers.find(x=>x.id===id);if(c)Object.assign(c,{name:nm,scale:sc,type:tp});
     await dbUpdate('centers',{name:nm,scale:sc,type:tp},'id',id);
   } else {
-    const r=await dbInsert('centers',{name:nm,scale:sc,type:tp});
-    S.centers.push({id:r?.id||Date.now(),name:nm,scale:sc,type:tp,centerId:r?.id||Date.now()});
+    if(!DEMO_MODE && dbClient){
+      const r=await dbInsert('centers',{name:nm,scale:sc,type:tp});
+      if(!r){ return; }
+      S.centers.push({id:r.id,name:nm,scale:sc,type:tp,centerId:r.id});
+    } else {
+      const tid=Date.now();
+      S.centers.push({id:tid,name:nm,scale:sc,type:tp,centerId:tid});
+    }
   }
   toast('저장되었습니다');closeModal();render();
 }
@@ -1156,9 +1173,16 @@ async function addStaffByMgr(){
   const nm=g('sf_nm')?.value?.trim(),em=g('sf_em')?.value?.trim();
   if(!nm||!em)return alert('필수 항목 입력');
   const cid=S.user.centerId,jd=g('sf_dt')?.value;
-  const r=await dbInsert('staff',{name:nm,email:em,center_id:cid,join_date:jd,status:'approved'});
-  S.staff.push({id:r?.id||Date.now(),name:nm,email:em,centerId:cid,joinDate:jd,status:'approved'});
-  toast('추가');closeModal();render();
+  if(!DEMO_MODE && dbClient){
+    // 실 DB 모드: DB 저장 후 반환된 ID 사용
+    const r=await dbInsert('staff',{name:nm,email:em,center_id:cid,join_date:jd,status:'approved'});
+    if(!r){ return; } // dbInsert에서 toast 표시됨, 메모리 추가 안 함
+    S.staff.push({id:r.id,name:nm,email:em,centerId:cid,joinDate:jd,status:'approved'});
+  } else {
+    // 데모 모드: 임시 ID 사용
+    S.staff.push({id:Date.now(),name:nm,email:em,centerId:cid,joinDate:jd,status:'approved'});
+  }
+  toast(nm+' 센터원이 등록되었습니다');closeModal();render();
 }
 async function deleteStaffByMgr(id){
   if(!confirm('센터원을 삭제하시겠습니까?')) return;
