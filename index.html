@@ -167,6 +167,11 @@ body{font-family:-apple-system,'Apple SD Gothic Neo','Noto Sans KR',sans-serif;b
 .safety-row label{color:#555;min-width:140px}
 .safety-num{width:70px;padding:5px 8px;border:1px solid #ddd;border-radius:6px;font-family:inherit;font-size:12px;text-align:center}
 .deduct-preview{font-size:11px;color:#ef4444;font-weight:600;margin-left:6px}
+.pw-change-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:99999;display:flex;align-items:center;justify-content:center}
+.pw-change-box{background:white;border-radius:18px;padding:32px 28px;width:420px;max-width:92vw;box-shadow:0 24px 60px rgba(0,0,0,0.25)}
+.pw-change-box h2{font-size:18px;font-weight:700;margin-bottom:6px;color:#111}
+.pw-change-box p{font-size:12px;color:#888;margin-bottom:22px;line-height:1.6}
+.pw-req{font-size:11px;color:#888;margin-top:4px}
 </style>
 </head>
 <body>
@@ -230,7 +235,6 @@ body{font-family:-apple-system,'Apple SD Gothic Neo','Noto Sans KR',sans-serif;b
 //const SUPABASE_ANON = 'YOUR_ANON_PUBLIC_KEY';
 const SUPABASE_URL  = 'https://wdbndirmgzvcshoioqet.supabase.co';   // ← 교체
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndkYm5kaXJtZ3p2Y3Nob2lvcWV0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMzE2NzUsImV4cCI6MjA5MTYwNzY3NX0.HuWhoBPhcHZmGS2wFu8vWA402hu3n-OCA0KYVxC9CAQ';                  // ← 교체
-
 
 const DEMO_MODE = SUPABASE_URL.includes('YOUR_PROJECT_ID');
 let dbClient = DEMO_MODE ? null : window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
@@ -372,6 +376,18 @@ const g = id => document.getElementById(id);
 const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 const GS = {S:5,A:4,B:3,C:2,D:1};
 const GC = {S:'#f59e0b',A:'#3b82f6',B:'#10b981',C:'#f97316',D:'#ef4444'};
+const GP = {S:100,A:80,B:60,C:40,D:20}; // 등급별 100점 환산
+// 항목 기여점수: 등급 × 가중치
+function kpiContrib(grade, weight){ return grade?Math.round(GP[grade]*(weight/100)):0; }
+// 모든 센터원의 특정 KPI 순위 반환
+function kpiRankAmong(staffId, kpiId){
+  const allApproved=S.staff.filter(s=>s.status==='approved');
+  const scores=allApproved.map(s=>{
+    const ev=S.staffEvals['stf_'+s.id]||{};
+    return{id:s.id,score:kpiContrib(ev['kpi_'+kpiId], S.staffKPIs.find(k=>k.id===kpiId)?.weight||0)};
+  }).sort((a,b)=>b.score-a.score);
+  return scores.findIndex(s=>s.id===staffId)+1;
+}
 
 function calcScore(evObj, kpis, safetyKey) {
   let ws=0, wt=0;
@@ -454,6 +470,7 @@ async function doLogin(){
       staffId: profile?.staff_id || demoRef.staffId || null,
       managerId: profile?.manager_id || demoRef.managerId || null,
       joinDate: profile?.join_date || demoRef.joinDate || '',
+      mustChangePw: profile?.must_change_password === true,
     };
 
     await loadFromSupabase();
@@ -627,6 +644,8 @@ async function showApp(){
     if(found){ S.user.managerId=found.id; S.user.centerId=found.centerId||found.center_id; console.log('managerId 자동 보정:',found.id); }
   }
   buildNav(); render();
+  // 최초 로그인 비밀번호 변경 강제
+  if(S.user.mustChangePw) showPwChangeModal();
 }
 
 function buildNav(){
@@ -754,14 +773,49 @@ async function saveMgr(){
   const nm=g('m_nm')?.value?.trim(),em=g('m_em')?.value?.trim();
   if(!nm||!em)return alert('이름과 이메일을 입력하세요');
   const cid=parseInt(g('m_cid')?.value),jd=g('m_dt')?.value,st=g('m_st')?.value;
+  const DEFAULT_PW='sni99999!@#';
+  const cname=getCenterName(cid);
+
   if(!DEMO_MODE && dbClient){
-    const r=await dbInsert('managers',{name:nm,center_id:cid,email:em,join_date:jd,status:st});
-    if(!r){ return; }
-    S.managers.push({id:r.id,name:nm,centerId:cid,email:em,joinDate:jd,status:st});
+    // ① managers 테이블 INSERT
+    const mgrRow=await dbInsert('managers',{name:nm,center_id:cid,email:em,join_date:jd,status:st});
+    if(!mgrRow){ return; }
+
+    // ② Auth 사용자 생성
+    let authUserId=null;
+    try{
+      const {data:authData,error:authErr}=await dbClient.auth.signUp({
+        email:em, password:DEFAULT_PW,
+        options:{data:{name:nm, role:'manager'}}
+      });
+      if(authErr) throw authErr;
+      authUserId=authData?.user?.id||authData?.session?.user?.id;
+    }catch(authE){
+      console.warn('Auth 생성 오류:',authE.message);
+      toast('계정 생성 오류: '+authE.message,'warn');
+    }
+
+    // ③ profiles 업데이트
+    if(authUserId){
+      await dbUpsert('profiles',{
+        id:authUserId,
+        name:nm,
+        role:'manager',
+        title:'센터장',
+        org:cname,
+        center_id:cid,
+        manager_id:mgrRow.id,
+        must_change_password:true,
+      },'id');
+    }
+
+    S.managers.push({id:mgrRow.id,name:nm,centerId:cid,email:em,joinDate:jd,status:st});
+    toast(`✅ ${nm} 등록 완료 | 임시 비밀번호: ${DEFAULT_PW}`);
   } else {
     S.managers.push({id:Date.now(),name:nm,centerId:cid,email:em,joinDate:jd,status:st});
+    toast(nm+' 센터장이 추가되었습니다 (데모)');
   }
-  toast(nm+' 센터장이 추가되었습니다');closeModal();render();
+  closeModal();render();
 }
 
 function pgMgrKPI(){ return kpiMgmtPage('mgr','센터장','b-blue'); }
@@ -940,7 +994,10 @@ function pgAdminRanking(){
     <td style="font-size:11px">${esc(getCenterName(s.centerId))}</td>
     <td style="text-align:center;font-weight:700">${s.score!==null?s.score+'점':'—'}</td>
     <td style="text-align:center"><span class="badge ${s.grade?'b-'+s.grade:'b-none'}">${s.grade||'—'}</span></td>
-    <td><button class="btn btn-outline btn-xs" onclick="modalStaffEvalAdmin(${s.id})">평가 입력</button></td></tr>`;
+    <td>
+      <button class="btn btn-outline btn-xs" onclick="modalStaffEvalAdmin(${s.id})">평가 입력</button>
+      <button class="btn btn-blue btn-xs" onclick="modalKPIBreakdown(${s.id})" style="margin-left:4px">항목별</button>
+    </td></tr>`;
   }).join(''):`<tr><td colspan="6" class="empty">센터원 데이터 없음</td></tr>`;
   return`<div class="ph"><div class="ptitle">센터원 순위 조회</div><div class="psub">전체 센터원 OKR 평가 점수 및 순위 (본부장 전체 공개)</div></div>
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
@@ -953,23 +1010,37 @@ function modalStaffEvalAdmin(staffId){
   const s=S.staff.find(x=>x.id===staffId); const ekey='stf_'+staffId;
   if(!S.staffEvals[ekey])S.staffEvals[ekey]={};
   const ev=S.staffEvals[ekey];
-  const sd=S.safetyData[ekey]||{ruleVio:0,ltiCount:0};
-  const kpiRows=S.staffKPIs.map(k=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-bottom:1px solid #f5f5f5">
-    <div><div style="font-size:12px;font-weight:600">${esc(k.name)}</div><div style="font-size:10px;color:#888">${esc(k.obj)}·${k.weight}%</div></div>
-    <div class="gbrow">${['S','A','B','C','D'].map(gr=>`<button class="gbtn${ev['kpi_'+k.id]===gr?' g'+gr:''}" onclick="setGrade('${ekey}',${k.id},'${gr}',this)">${gr}</button>`).join('')}</div>
-  </div>`).join('');
-  const score=calcScore(ev,S.staffKPIs,ekey);const fg=getGrade(score);
+  const perf=getPerf(staffId);
+  const score=calcScore(ev,S.staffKPIs,ekey); const fg=getGrade(score);
+  const kpiRows=S.staffKPIs.map(k=>{
+    const d=perf?.kpiData?.[k.id]||{};
+    const contrib=kpiContrib(ev['kpi_'+k.id],k.weight);
+    return`<div style="padding:10px 0;border-bottom:1px solid #f5f5f5">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:${d.content||d.count?'6px':'0'}">
+      <div>
+        <span style="font-size:12px;font-weight:600">${esc(k.name)}</span>
+        <span style="font-size:10px;color:#888;margin-left:6px">${esc(k.obj)}·${k.weight}%</span>
+        ${d.count?`<span style="margin-left:8px;background:#ede9fe;color:#5b21b6;font-size:10px;font-weight:700;padding:2px 7px;border-radius:12px">실적 ${d.count}건</span>`:''}
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <div class="gbrow">${['S','A','B','C','D'].map(gr=>`<button class="gbtn${ev['kpi_'+k.id]===gr?' g'+gr:''}" onclick="setGrade('${ekey}',${k.id},'${gr}',this)">${gr}</button>`).join('')}</div>
+        <span style="font-size:11px;color:#e91e8c;font-weight:700;min-width:32px;text-align:right">${contrib?contrib+'점':''}</span>
+      </div>
+    </div>
+    ${d.content?`<div style="font-size:11px;color:#555;background:#f8f9fa;border-radius:6px;padding:5px 8px">${esc(d.content)}</div>`:''}
+    </div>`;
+  }).join('');
   showModal(`<div class="mtitle">${esc(s.name)} 센터원 평가</div>
   <div style="font-size:11px;color:#888;margin-bottom:12px">${esc(getCenterName(s.centerId))}</div>
+  <div style="font-size:11px;color:#3b82f6;background:#eff6ff;border-radius:7px;padding:8px 12px;margin-bottom:12px">💡 센터원 제출 내용과 실적 건수를 참고하여 S/A/B/C/D 등급을 선택하세요. 항목별 기여점수가 자동 계산됩니다.</div>
   ${kpiRows}
-  <div class="safety-input"><h4>🛡 안전 위반 건수 입력 (감점 자동 적용)</h4>
-  <div class="safety-row"><label>규정위반 건수 (-2점/건)</label><input type="number" class="safety-num" id="sd_rv" min="0" value="${sd.ruleVio||0}" onchange="updateSafety('${ekey}','ruleVio',this.value)"><span class="deduct-preview" id="ded_rv">-${(sd.ruleVio||0)*2}점</span></div>
-  <div class="safety-row"><label>LTI 건수 (-5점/건)</label><input type="number" class="safety-num" id="sd_lt" min="0" value="${sd.ltiCount||0}" onchange="updateSafety('${ekey}','ltiCount',this.value)"><span class="deduct-preview" id="ded_lt">-${(sd.ltiCount||0)*5}점</span></div></div>
-  <div id="deduct_${ekey}" class="ded-box" style="${(sd.ruleVio||0)+(sd.ltiCount||0)>0?'':'display:none'}"><strong>⚠ 안전 감점 적용 중</strong>${esc(deductInfo(ekey)||'')}</div>
-  <div style="margin-top:12px;padding:11px;background:#f8f9fa;border-radius:9px;display:flex;justify-content:space-between;align-items:center">
-    <span style="font-size:12px;color:#555">종합 점수</span>
-    <div><span id="score_${ekey}" style="font-weight:700;font-size:15px">${score!==null?score+'점':'—'}</span>
-    <span id="grade_${ekey}" class="badge ${fg?'b-'+fg:'b-none'}" style="margin-left:7px">${fg||'—'}</span></div>
+  <div style="margin-top:12px;padding:11px;background:#f8f9fa;border-radius:9px">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <span style="font-size:12px;color:#555">종합 점수</span>
+      <div><span id="score_${ekey}" style="font-weight:700;font-size:15px">${score!==null?score+'점':'—'}</span>
+      <span id="grade_${ekey}" class="badge ${fg?'b-'+fg:'b-none'}" style="margin-left:7px">${fg||'—'}</span></div>
+    </div>
+    <div style="font-size:10px;color:#aaa;margin-top:4px">등급 기여점수: S=가중치×100%, A=×80%, B=×60%, C=×40%, D=×20%</div>
   </div>
   <div class="mfoot"><button class="btn btn-gray" onclick="closeModal()">닫기</button><button class="btn btn-pink" onclick="closeModal();render()">확인</button></div>`);
 }
@@ -1185,20 +1256,85 @@ function modalAddStaffMgr(){
   <div class="fg"><label class="fl">입사일</label><input class="fi" id="sf_dt" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
   <div class="mfoot"><button class="btn btn-gray" onclick="closeModal()">취소</button><button class="btn btn-pink" onclick="addStaffByMgr()">저장</button></div>`);
 }
+// ══ 비밀번호 변경 모달 ══
+function showPwChangeModal(forced=true){
+  const overlay=document.createElement('div');
+  overlay.id='pwChangeOverlay'; overlay.className='pw-change-overlay';
+  overlay.innerHTML=`<div class="pw-change-box">
+    <h2>🔐 비밀번호 변경 ${forced?'(필수)':''}</h2>
+    <p>${forced?'최초 로그인입니다. 보안을 위해 비밀번호를 변경해 주세요.<br>':''}현재 임시 비밀번호: <strong>sni99999!@#</strong></p>
+    <div class="fg"><label class="fl">새 비밀번호 *</label><input class="fi" id="pw_new" type="password" placeholder="8자 이상 입력"></div>
+    <div class="fg"><label class="fl">새 비밀번호 확인 *</label><input class="fi" id="pw_confirm" type="password" placeholder="동일하게 입력" onkeydown="if(event.key==='Enter')doChangePw(${forced})"></div>
+    <div class="pw-req">• 8자 이상 • 영문+숫자+특수문자 권장</div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:20px">
+      ${!forced?'<button class="btn btn-gray" onclick="document.getElementById('pwChangeOverlay').remove()">나중에</button>':''}
+      <button class="btn btn-pink" onclick="doChangePw(${forced})">변경하기</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+}
+async function doChangePw(forced=true){
+  const np=g('pw_new')?.value,cp=g('pw_confirm')?.value;
+  if(!np||np.length<8){toast('8자 이상 입력해주세요','warn');return;}
+  if(np!==cp){toast('비밀번호가 일치하지 않습니다','warn');return;}
+  try{
+    const {error}=await dbClient.auth.updateUser({password:np});
+    if(error)throw error;
+    // profiles must_change_password = false
+    if(S.user?.id) await dbUpdate('profiles',{must_change_password:false},'id',S.user.id);
+    S.user.mustChangePw=false;
+    document.getElementById('pwChangeOverlay')?.remove();
+    toast('비밀번호가 변경되었습니다');
+  }catch(e){toast('변경 오류: '+e.message,'error');}
+}
+
 async function addStaffByMgr(){
   const nm=g('sf_nm')?.value?.trim(),em=g('sf_em')?.value?.trim();
   if(!nm||!em)return alert('필수 항목 입력');
   const cid=S.user.centerId,jd=g('sf_dt')?.value;
+  const DEFAULT_PW='sni99999!@#';
+
   if(!DEMO_MODE && dbClient){
-    // 실 DB 모드: DB 저장 후 반환된 ID 사용
-    const r=await dbInsert('staff',{name:nm,email:em,center_id:cid,join_date:jd,status:'approved'});
-    if(!r){ return; } // dbInsert에서 toast 표시됨, 메모리 추가 안 함
-    S.staff.push({id:r.id,name:nm,email:em,centerId:cid,joinDate:jd,status:'approved'});
+    // ① staff 테이블 INSERT
+    const staffRow=await dbInsert('staff',{name:nm,email:em,center_id:cid,join_date:jd,status:'approved'});
+    if(!staffRow){ return; }
+
+    // ② Supabase Auth 사용자 생성 (signUp - 이메일 인증 비활성화 필요)
+    let authUserId=null;
+    try{
+      const {data:authData,error:authErr}=await dbClient.auth.signUp({
+        email:em, password:DEFAULT_PW,
+        options:{data:{name:nm, role:'staff'}}
+      });
+      if(authErr) throw authErr;
+      authUserId=authData?.user?.id||authData?.session?.user?.id;
+    }catch(authE){
+      console.warn('Auth 생성 오류 (이미 존재하거나 이메일 중복):',authE.message);
+      toast('계정 생성 오류: '+authE.message+' (이미 존재하는 이메일일 수 있습니다)','warn');
+    }
+
+    // ③ profiles 테이블 업데이트 (Auth 성공 시)
+    if(authUserId){
+      await dbUpsert('profiles',{
+        id:authUserId,
+        name:nm,
+        role:'staff',
+        title:'센터원',
+        org:S.user.org||getCenterName(cid),
+        center_id:cid,
+        staff_id:staffRow.id,
+        manager_id:S.user.managerId||null,
+        must_change_password:true,
+      },'id');
+    }
+
+    S.staff.push({id:staffRow.id,name:nm,email:em,centerId:cid,joinDate:jd,status:'approved'});
+    toast(`✅ ${nm} 등록 완료 | 임시 비밀번호: ${DEFAULT_PW}`);
   } else {
-    // 데모 모드: 임시 ID 사용
     S.staff.push({id:Date.now(),name:nm,email:em,centerId:cid,joinDate:jd,status:'approved'});
+    toast(nm+' 센터원이 등록되었습니다 (데모)');
   }
-  toast(nm+' 센터원이 등록되었습니다');closeModal();render();
+  closeModal();render();
 }
 async function deleteStaffByMgr(id){
   if(!confirm('센터원을 삭제하시겠습니까?')) return;
@@ -1306,18 +1442,31 @@ function pgMgrReview(){
 function pgStaffEval(){
   const cid=S.user.centerId;
   const myStaff=S.staff.filter(s=>s.centerId===cid&&s.status==='approved');
-  const hdr=S.staffKPIs.map(k=>`<th style="text-align:center;min-width:120px;font-size:10px">${esc(k.name)}<br><span style="font-weight:400;color:#aaa">${k.weight}%</span></th>`).join('');
   const rows=myStaff.map(s=>{
     const ekey='stf_'+s.id; const ev=S.staffEvals[ekey]||{};
     const score=calcScore(ev,S.staffKPIs,ekey); const fg=getGrade(score);
-    const kpiCols=S.staffKPIs.map(k=>`<td><div class="gbrow" style="justify-content:center">${['S','A','B','C','D'].map(gr=>`<button class="gbtn${ev['kpi_'+k.id]===gr?' g'+gr:''}" onclick="setGrade('${ekey}',${k.id},'${gr}',this)">${gr}</button>`).join('')}</div></td>`).join('');
-    return`<tr><td><div style="display:flex;align-items:center;gap:7px"><div class="av av-pk">${s.name[0]}</div><span style="font-weight:600">${esc(s.name)}</span></div></td>
-    ${kpiCols}
+    return`<tr>
+    <td><div style="display:flex;align-items:center;gap:7px"><div class="av av-pk">${s.name[0]}</div><span style="font-weight:600">${esc(s.name)}</span></div></td>
+    <td style="max-width:360px">
+      <div style="display:flex;flex-wrap:wrap;gap:4px">
+      ${S.staffKPIs.map(k=>{
+        const gr=ev['kpi_'+k.id]; const contrib=kpiContrib(gr,k.weight);
+        return`<div style="background:#f8f9fa;border-radius:7px;padding:4px 8px;font-size:11px;border:1px solid ${gr?'#e5e7eb':'#f0f0f0'}">
+          <span style="color:#555">${esc(k.name.substring(0,6))}</span>
+          <span class="badge ${gr?'b-'+gr:'b-none'}" style="margin:0 3px">${gr||'—'}</span>
+          <span style="color:#e91e8c;font-weight:600">${contrib?contrib+'점':''}</span>
+        </div>`;
+      }).join('')}
+      </div>
+    </td>
     <td style="text-align:center"><span id="score_${ekey}" style="font-weight:700">${score!==null?score+'점':'—'}</span></td>
-    <td style="text-align:center"><span id="grade_${ekey}" class="badge ${fg?'b-'+fg:'b-none'}">${fg||'—'}</span></td></tr>`;
+    <td style="text-align:center"><span id="grade_${ekey}" class="badge ${fg?'b-'+fg:'b-none'}">${fg||'—'}</span></td>
+    <td><button class="btn btn-outline btn-xs" onclick="modalStaffEvalAdmin(${s.id})">평가 입력</button>
+        <button class="btn btn-blue btn-xs" onclick="modalKPIBreakdown(${s.id})" style="margin-left:4px">항목별</button></td>
+    </tr>`;
   }).join('');
-  return`<div class="ph"><div class="ptitle">센터원 평가</div><div class="psub">소속 센터원의 OKR 등급을 입력합니다</div></div>
-  <div class="card"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>이름</th>${hdr}<th>종합점수</th><th>등급</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+  return`<div class="ph"><div class="ptitle">센터원 평가</div><div class="psub">소속 센터원의 OKR 등급을 입력합니다. 항목별 버튼으로 KPI별 순위를 확인하세요.</div></div>
+  <div class="card"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>이름</th><th>항목별 등급/점수</th><th>종합점수</th><th>등급</th><th>처리</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
 }
 
 function pgMyEval(){
@@ -1363,10 +1512,11 @@ function pgCenterRank(){
     return`<tr><td><div class="rbox ${rank===1?'rk1':rank===2?'rk2':rank===3?'rk3':'rkn'}">${rank}</div></td>
     <td><div style="display:flex;align-items:center;gap:7px"><div class="av av-pk">${s.name[0]}</div><span style="font-weight:600">${esc(s.name)}</span></div></td>
     <td style="text-align:center;font-weight:700">${s.score!==null?s.score+'점':'—'}</td>
-    <td style="text-align:center"><span class="badge ${s.grade?'b-'+s.grade:'b-none'}">${s.grade||'—'}</span></td></tr>`;
-  }).join(''):`<tr><td colspan="4" class="empty">평가 데이터 없음</td></tr>`;
-  return`<div class="ph"><div class="ptitle">센터원 순위 조회</div><div class="psub">소속 센터원 전체 OKR 순위 (센터장은 전체 공개)</div></div>
-  <div class="card"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>순위</th><th>이름</th><th>종합 점수</th><th>등급</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+    <td style="text-align:center"><span class="badge ${s.grade?'b-'+s.grade:'b-none'}">${s.grade||'—'}</span></td>
+    <td><button class="btn btn-outline btn-xs" onclick="modalKPIBreakdown(${s.id})">항목별 순위</button></td></tr>`;
+  }).join(''):`<tr><td colspan="5" class="empty">평가 데이터 없음</td></tr>`;
+  return`<div class="ph"><div class="ptitle">센터원 순위 조회</div><div class="psub">소속 센터원 전체 OKR 순위 · 항목별 순위 버튼으로 KPI별 기여 점수와 순위를 확인하세요</div></div>
+  <div class="card"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>순위</th><th>이름</th><th>종합 점수</th><th>등급</th><th>상세</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
 }
 
 // ══════════════════════════════════════════
@@ -1481,7 +1631,7 @@ function pgMySubmit(){
   const disabled=isSubmitted&&!isRejected;
   const kpiInputs=S.staffKPIs.map((k,idx)=>{
     const d=perf.kpiData?.[k.id]||{};
-    const hasContent=!!(d.content);
+    const hasContent=!!(d.content||d.count);
     return`<div class="perf-kpi" style="border-left:3px solid ${hasContent?'#10b981':'#e5e7eb'}">
     <div class="perf-kpi-head">
       <div>
@@ -1489,29 +1639,33 @@ function pgMySubmit(){
           <span style="width:22px;height:22px;border-radius:50%;background:${hasContent?'#d1fae5':'#f3f4f6'};color:${hasContent?'#065f46':'#9ca3af'};display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">${hasContent?'✓':idx+1}</span>
           <div class="perf-kpi-title">${esc(k.name)}</div>
           <span class="badge b-gray" style="font-size:10px">${esc(k.obj)}</span>
-          <span style="font-size:11px;color:#e91e8c;font-weight:600">${k.weight}%</span>
+          <span style="font-size:11px;color:#e91e8c;font-weight:600">가중치 ${k.weight}%</span>
         </div>
         <div style="font-size:11px;color:#888;margin-top:6px;margin-left:30px;white-space:pre-line;line-height:1.6">${esc(k.criteria)}</div>
       </div>
     </div>
     <div style="margin-left:30px;margin-top:10px">
-      <div class="fg">
-        <label class="fl">실적 내용 <span style="color:#e91e8c">*</span></label>
-        <textarea class="fta" id="kpi_content_${k.id}" ${disabled?'disabled':''} 
-          placeholder="달성 내용을 구체적으로 입력하세요 (수치 포함 권장)"
-          style="min-height:72px">${esc(d.content||'')}</textarea>
-      </div>
-      <div class="fg">
-        <label class="fl">증빙 자료 <span style="color:#aaa;font-weight:400">(선택)</span></label>
-        <input class="fi" id="kpi_ev_${k.id}" ${disabled?'disabled':''} 
-          placeholder="계약서, 보고서, URL 등 증빙 자료명" value="${esc(d.evidence||'')}">
+      <div style="display:flex;gap:10px;margin-bottom:10px">
+        <div class="fg" style="flex:0 0 120px;margin-bottom:0">
+          <label class="fl">실적 건수</label>
+          <div style="display:flex;align-items:center;gap:6px">
+            <input type="number" class="fi" id="kpi_count_${k.id}" ${disabled?'disabled':''} min="0" 
+              placeholder="0" style="text-align:center" value="${esc(String(d.count||''))}">
+            <span style="font-size:11px;color:#888;white-space:nowrap">건</span>
+          </div>
+        </div>
+        <div class="fg" style="flex:1;margin-bottom:0">
+          <label class="fl">실적 내용 <span style="color:#e91e8c">*</span></label>
+          <input class="fi" id="kpi_content_${k.id}" ${disabled?'disabled':''} 
+            placeholder="달성 내용을 구체적으로 입력하세요" value="${esc(d.content||'')}">
+        </div>
       </div>
     </div>
     </div>`;
   }).join('');
 
   // 진행률 계산
-  const filled=S.staffKPIs.filter(k=>(perf.kpiData?.[k.id]?.content||'').trim()).length;
+  const filled=S.staffKPIs.filter(k=>(perf.kpiData?.[k.id]?.content||'').trim()||(perf.kpiData?.[k.id]?.count>0)).length;
   const pct=Math.round(filled/S.staffKPIs.length*100);
 
   return`<div class="ph"><div class="ptitle">실적 제출</div><div class="psub">분기별 OKR 항목별 실적을 입력하고 제출합니다</div></div>
@@ -1534,7 +1688,7 @@ function pgMySubmit(){
 async function saveDraft(perfKey){
   const parts=perfKey.split('__'); const sid=parseInt(parts[0]); const qtr=parts[1];
   const kpiData={};
-  S.staffKPIs.forEach(k=>{kpiData[k.id]={content:g('kpi_content_'+k.id)?.value||'',evidence:g('kpi_ev_'+k.id)?.value||''};});
+  S.staffKPIs.forEach(k=>{kpiData[k.id]={content:g('kpi_content_'+k.id)?.value||'',count:parseInt(g('kpi_count_'+k.id)?.value)||0};});
   S.performances[perfKey]={...S.performances[perfKey]||{},kpiData,status:'draft',quarter:qtr,staffId:sid};
   saveLocal();
   // Supabase 저장
@@ -1556,8 +1710,9 @@ async function submitPerf(perfKey){
   let hasAny=false;
   S.staffKPIs.forEach(k=>{
     const v=g('kpi_content_'+k.id)?.value||'';
-    kpiData[k.id]={content:v,evidence:g('kpi_ev_'+k.id)?.value||''};
-    if(v.trim())hasAny=true;
+    const cnt=parseInt(g('kpi_count_'+k.id)?.value)||0;
+    kpiData[k.id]={content:v,count:cnt};
+    if(v.trim()||cnt>0)hasAny=true;
   });
   if(!hasAny){toast('최소 1개 항목 이상 실적을 입력해주세요','warn');return;}
   const submittedAt=new Date().toLocaleDateString('ko-KR');
@@ -1602,6 +1757,7 @@ function pgMyRank(){
     <td style="font-size:11px;color:#888">${isMe?esc(getCenterName(s.centerId)):'—'}</td>
     <td style="text-align:center;font-weight:${isMe?'700':'400'};color:${isMe?'#111':'#9ca3af'}">${isMe&&s.score!==null?s.score+'점':'•'}</td>
     <td style="text-align:center"><span class="badge ${isMe&&s.grade?'b-'+s.grade:'b-none'}">${isMe&&s.grade?s.grade:'•'}</span></td>
+    <td>${isMe?`<button class="btn btn-outline btn-xs" onclick="modalKPIBreakdown(${s.id})">항목별 순위</button>`:''}</td>
     </tr>`;
   }).join('');
 
@@ -1622,8 +1778,71 @@ function pgMyRank(){
   </div>
   <div class="card">
     <div class="sh"><div class="stit">전체 순위 (개인 정보 보호)</div><div class="ssub">본인 외 이름·점수·등급 비공개</div></div>
-    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>순위</th><th>이름</th><th>소속</th><th>점수</th><th>등급</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>순위</th><th>이름</th><th>소속</th><th>점수</th><th>등급</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
   </div>`;
+}
+
+// ══════════════════════════════════════════
+//  항목별 순위 모달
+// ══════════════════════════════════════════
+function modalKPIBreakdown(staffId){
+  const s=S.staff.find(x=>x.id===staffId);
+  if(!s) return;
+  const ekey='stf_'+staffId;
+  const ev=S.staffEvals[ekey]||{};
+  const totalScore=calcScore(ev,S.staffKPIs,ekey);
+  const totalGrade=getGrade(totalScore);
+  const perf=getPerf(staffId);
+
+  // 전체 항목별 순위 계산
+  const allStaff=S.staff.filter(x=>x.status==='approved');
+  const kpiRows=S.staffKPIs.map(k=>{
+    const gr=ev['kpi_'+k.id];
+    const contrib=kpiContrib(gr,k.weight);
+    // 이 KPI에서 전체 순위
+    const ranked=allStaff.map(x=>{
+      const xev=S.staffEvals['stf_'+x.id]||{};
+      return{id:x.id,score:kpiContrib(xev['kpi_'+k.id],k.weight)};
+    }).sort((a,b)=>b.score-a.score);
+    const kpiRank=ranked.findIndex(x=>x.id===staffId)+1;
+    const pct=k.weight; // 이 항목 최대 기여점수
+    const barW=contrib?Math.round(contrib/pct*100):0;
+    const d=perf?.kpiData?.[k.id]||{};
+    return`<div style="padding:10px 0;border-bottom:1px solid #f5f5f5">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px">
+        <div>
+          <span style="font-size:12px;font-weight:600">${esc(k.name)}</span>
+          <span style="font-size:10px;color:#888;margin-left:6px">${esc(k.obj)}</span>
+          ${d.count?`<span style="margin-left:6px;background:#ede9fe;color:#5b21b6;font-size:10px;padding:1px 6px;border-radius:10px">${d.count}건</span>`:''}
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span class="badge ${gr?'b-'+gr:'b-none'}">${gr||'미평가'}</span>
+          <span style="font-size:12px;font-weight:700;color:#e91e8c">${contrib}점</span>
+          <span style="font-size:11px;color:#888">/ ${pct}점</span>
+          <div class="rbox ${kpiRank===1?'rk1':kpiRank===2?'rk2':kpiRank===3?'rk3':'rkn'}" style="font-size:10px;width:30px;height:22px;border-radius:6px">${gr?kpiRank+'위':'—'}</div>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px">
+        <div style="flex:1;height:5px;background:#f0f0f0;border-radius:3px;overflow:hidden">
+          <div style="height:100%;width:${barW}%;background:#e91e8c;border-radius:3px"></div>
+        </div>
+        <span style="font-size:10px;color:#aaa;min-width:36px">${barW}%</span>
+      </div>
+      ${d.content?`<div style="font-size:11px;color:#666;margin-top:4px;background:#f9fafb;border-radius:5px;padding:4px 7px">${esc(d.content)}</div>`:''}
+    </div>`;
+  }).join('');
+
+  showModal(`<div class="mtitle">📊 ${esc(s.name)} 항목별 순위</div>
+  <div style="display:flex;align-items:center;justify-content:space-between;background:#f8f9fa;border-radius:10px;padding:12px 16px;margin-bottom:14px">
+    <div>
+      <div style="font-size:11px;color:#888">종합 점수</div>
+      <div style="font-size:22px;font-weight:700;color:#111">${totalScore!==null?totalScore+'점':'미평가'}</div>
+    </div>
+    <span class="badge ${totalGrade?'b-'+totalGrade:'b-none'}" style="font-size:16px;padding:6px 16px">${totalGrade||'—'}</span>
+  </div>
+  <div style="font-size:11px;color:#888;margin-bottom:8px">항목명 · 등급 · 기여점수 · 항목 내 순위</div>
+  ${kpiRows}
+  <div class="mfoot"><button class="btn btn-gray" onclick="closeModal()">닫기</button></div>`);
 }
 
 // ══════════════════════════════════════════
@@ -1653,6 +1872,7 @@ async function init(){
         staffId: profile?.staff_id || demoRef.staffId || null,
         managerId: profile?.manager_id || demoRef.managerId || null,
         joinDate: profile?.join_date || demoRef.joinDate || '',
+        mustChangePw: profile?.must_change_password === true,
       };
       await loadFromSupabase();
       showApp();
