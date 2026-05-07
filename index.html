@@ -389,6 +389,70 @@ function kpiRankAmong(staffId, kpiId){
   return scores.findIndex(s=>s.id===staffId)+1;
 }
 
+// ── 자동 등급 배분: S:10% A:25% B:30% C:25% D:10% ──
+function gradeByPercentile(rank, total){
+  if(!total) return 'B';
+  const pct=(rank-0.5)/total; // 중앙값 기준 백분위
+  if(pct<=0.10) return 'S';
+  if(pct<=0.35) return 'A';
+  if(pct<=0.65) return 'B';
+  if(pct<=0.90) return 'C';
+  return 'D';
+}
+
+// 안전 KPI 여부 판단
+function isSafetyKPI(k){ return k.obj==='안전관리'&&(k.name.includes('이행율')||k.name.includes('ZERO')); }
+
+// KPI별 실적 원점수 계산
+function kpiRawScore(staffId, k){
+  const perf=getPerf(staffId);
+  const d=perf?.kpiData?.[k.id]||{};
+  if(isSafetyKPI(k)){
+    // 안전: 100점 기준 위반 건수 감점
+    const vio=parseInt(d.violations||d.count||0);
+    const lti=parseInt(d.lti||0);
+    return Math.max(0, 100 - vio*2 - lti*5);
+  }
+  // 일반: 건수 (클수록 좋음)
+  return parseInt(d.count||0);
+}
+
+// ★ 전체 자동 등급 계산 (센터원 제출 건수 기반 상대평가)
+function autoCalcStaffGrades(){
+  const allStaff=S.staff.filter(s=>s.status==='approved');
+  if(!allStaff.length){ toast('평가할 센터원이 없습니다','warn'); return 0; }
+  let updated=0;
+  S.staffKPIs.forEach(k=>{
+    // 각 센터원의 이 KPI 원점수 수집
+    const scored=allStaff.map(s=>({id:s.id, raw:kpiRawScore(s.id,k)}));
+    // 동점 처리: 같은 점수는 같은 순위
+    const sortedUniq=[...new Set(scored.map(x=>x.raw))].sort((a,b)=>b-a);
+    scored.forEach(item=>{
+      const rank=sortedUniq.indexOf(item.raw)+1;
+      const grade=item.raw===0&&!isSafetyKPI(k)?null:gradeByPercentile(rank, sortedUniq.length);
+      if(!grade) return; // 0건 미제출은 등급 미부여
+      const ekey='stf_'+item.id;
+      if(!S.staffEvals[ekey]) S.staffEvals[ekey]={};
+      S.staffEvals[ekey]['kpi_'+k.id]=grade;
+      updated++;
+    });
+  });
+  saveLocal(); return updated;
+}
+
+// 자동계산 등급 분포 미리보기
+function gradeDistPreview(){
+  const allStaff=S.staff.filter(s=>s.status==='approved');
+  const dist={S:0,A:0,B:0,C:0,D:0,미평가:0};
+  allStaff.forEach(s=>{
+    const ekey='stf_'+s.id; const ev=S.staffEvals[ekey]||{};
+    const sc=calcScore(ev,S.staffKPIs,ekey);
+    const g=getGrade(sc);
+    if(g) dist[g]++; else dist['미평가']++;
+  });
+  return dist;
+}
+
 function calcScore(evObj, kpis, safetyKey) {
   let ws=0, wt=0;
   kpis.forEach(k=>{
@@ -1000,9 +1064,12 @@ function pgAdminRanking(){
     </td></tr>`;
   }).join(''):`<tr><td colspan="6" class="empty">센터원 데이터 없음</td></tr>`;
   return`<div class="ph"><div class="ptitle">센터원 순위 조회</div><div class="psub">전체 센터원 OKR 평가 점수 및 순위 (본부장 전체 공개)</div></div>
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">
     <select class="fi" style="width:220px" onchange="S.tab.adminRankCenter=this.value;render()">${cOpts}</select>
-    <button class="btn btn-pink btn-sm" onclick="modalAddStaff()">+ 센터원 추가</button>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-blue btn-sm" onclick="runAutoCalc()">⚡ 자동 등급 계산</button>
+      <button class="btn btn-pink btn-sm" onclick="modalAddStaff()">+ 센터원 추가</button>
+    </div>
   </div>
   <div class="card"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>순위</th><th>이름</th><th>소속 센터</th><th>종합 점수</th><th>등급</th><th>처리</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
 }
@@ -1465,7 +1532,26 @@ function pgStaffEval(){
         <button class="btn btn-blue btn-xs" onclick="modalKPIBreakdown(${s.id})" style="margin-left:4px">항목별</button></td>
     </tr>`;
   }).join('');
-  return`<div class="ph"><div class="ptitle">센터원 평가</div><div class="psub">소속 센터원의 OKR 등급을 입력합니다. 항목별 버튼으로 KPI별 순위를 확인하세요.</div></div>
+  const dist=gradeDistPreview();
+  const distBar=Object.entries(dist).filter(([g])=>g!=='미평가').map(([g,v])=>`
+    <div style="display:flex;align-items:center;gap:6px;font-size:11px">
+      <span class="badge b-${g}" style="min-width:24px;justify-content:center">${g}</span>
+      <div style="flex:1;height:5px;background:#f0f0f0;border-radius:3px;overflow:hidden">
+        <div style="height:100%;background:${GC[g]||'#ddd'};border-radius:3px;width:${Math.min(100,v/Math.max(1,S.staff.filter(x=>x.status==='approved').length)*100)}%"></div>
+      </div>
+      <span style="color:#888;min-width:20px">${v}명</span>
+    </div>`).join('');
+  return`<div class="ph"><div class="ptitle">센터원 평가</div><div class="psub">소속 센터원의 OKR 등급을 입력합니다</div></div>
+  <div style="background:white;border:1px solid #eee;border-radius:10px;padding:12px 16px;margin-bottom:14px;display:flex;align-items:flex-start;justify-content:space-between;gap:16px">
+    <div>
+      <div style="font-size:12px;font-weight:700;color:#111;margin-bottom:8px">📊 등급 분포 현황 (S:10% A:25% B:30% C:25% D:10%)</div>
+      <div style="display:flex;flex-direction:column;gap:4px;min-width:220px">${distBar}</div>
+    </div>
+    <div style="display:flex;gap:8px;flex-shrink:0">
+      <button class="btn btn-blue btn-sm" onclick="runAutoCalc()">⚡ 자동 등급 계산</button>
+      <button class="btn btn-outline btn-sm" onclick="render()">🔄 새로고침</button>
+    </div>
+  </div>
   <div class="card"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>이름</th><th>항목별 등급/점수</th><th>종합점수</th><th>등급</th><th>처리</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
 }
 
@@ -1631,7 +1717,10 @@ function pgMySubmit(){
   const disabled=isSubmitted&&!isRejected;
   const kpiInputs=S.staffKPIs.map((k,idx)=>{
     const d=perf.kpiData?.[k.id]||{};
-    const hasContent=!!(d.content||d.count);
+    const isSafety=isSafetyKPI(k);
+    const vio=d.violations||0; const lti=d.lti||0;
+    const safetyScore=isSafety?Math.max(0,100-vio*2-lti*5):null;
+    const hasContent=!!(d.content||d.count||d.violations||d.lti);
     return`<div class="perf-kpi" style="border-left:3px solid ${hasContent?'#10b981':'#e5e7eb'}">
     <div class="perf-kpi-head">
       <div>
@@ -1645,27 +1734,47 @@ function pgMySubmit(){
       </div>
     </div>
     <div style="margin-left:30px;margin-top:10px">
-      <div style="display:flex;gap:10px;margin-bottom:10px">
-        <div class="fg" style="flex:0 0 120px;margin-bottom:0">
-          <label class="fl">실적 건수</label>
+      ${isSafety?`
+      <div style="background:#fff3cd;border:1px solid #ffc107;border-radius:8px;padding:10px 12px;margin-bottom:8px">
+        <div style="font-size:11px;font-weight:700;color:#664d03;margin-bottom:6px">🛡 안전 위반 입력 (감점 자동 계산)</div>
+        <div style="display:flex;gap:12px;align-items:center">
           <div style="display:flex;align-items:center;gap:6px">
-            <input type="number" class="fi" id="kpi_count_${k.id}" ${disabled?'disabled':''} min="0" 
-              placeholder="0" style="text-align:center" value="${esc(String(d.count||''))}">
-            <span style="font-size:11px;color:#888;white-space:nowrap">건</span>
+            <label style="font-size:11px;color:#555;white-space:nowrap">규정위반</label>
+            <input type="number" class="fi" id="kpi_vio_${k.id}" ${disabled?'disabled':''} min="0" 
+              style="width:64px;text-align:center" value="${vio}"
+              oninput="updateSafetyPreview(${k.id},this.value,document.getElementById('kpi_lti_${k.id}')?.value||0)">
+            <span style="font-size:11px;color:#888">건(-2점)</span>
           </div>
+          <div style="display:flex;align-items:center;gap:6px">
+            <label style="font-size:11px;color:#555;white-space:nowrap">LTI</label>
+            <input type="number" class="fi" id="kpi_lti_${k.id}" ${disabled?'disabled':''} min="0"
+              style="width:64px;text-align:center" value="${lti}"
+              oninput="updateSafetyPreview(${k.id},document.getElementById('kpi_vio_${k.id}')?.value||0,this.value)">
+            <span style="font-size:11px;color:#888">건(-5점)</span>
+          </div>
+          <span id="safety_preview_${k.id}" style="font-size:13px;font-weight:700;color:${safetyScore>=80?'#065f46':safetyScore>=60?'#92400e':'#991b1b'}">
+            → ${safetyScore}점
+          </span>
         </div>
-        <div class="fg" style="flex:1;margin-bottom:0">
-          <label class="fl">실적 내용 <span style="color:#e91e8c">*</span></label>
-          <input class="fi" id="kpi_content_${k.id}" ${disabled?'disabled':''} 
-            placeholder="달성 내용을 구체적으로 입력하세요" value="${esc(d.content||'')}">
-        </div>
+      </div>`:`
+      <div style="display:flex;gap:10px;margin-bottom:8px;align-items:center">
+        <label style="font-size:11px;font-weight:600;color:#555;white-space:nowrap">실적 건수</label>
+        <input type="number" class="fi" id="kpi_count_${k.id}" ${disabled?'disabled':''} min="0"
+          placeholder="0" style="width:80px;text-align:center" value="${esc(String(d.count||''))}">
+        <span style="font-size:11px;color:#888">건</span>
+        <span style="font-size:11px;color:#aaa">(타 센터원 대비 상대 순위로 등급 자동 산정)</span>
+      </div>`}
+      <div class="fg" style="margin-bottom:0">
+        <label class="fl">실적 내용</label>
+        <input class="fi" id="kpi_content_${k.id}" ${disabled?'disabled':''} 
+          placeholder="달성 내용을 입력하세요" value="${esc(d.content||'')}">
       </div>
     </div>
     </div>`;
   }).join('');
 
   // 진행률 계산
-  const filled=S.staffKPIs.filter(k=>(perf.kpiData?.[k.id]?.content||'').trim()||(perf.kpiData?.[k.id]?.count>0)).length;
+  const filled=S.staffKPIs.filter(k=>{const d=perf.kpiData?.[k.id]||{};return(d.content||'').trim()||d.count>0||d.violations>0||d.lti>0;}).length;
   const pct=Math.round(filled/S.staffKPIs.length*100);
 
   return`<div class="ph"><div class="ptitle">실적 제출</div><div class="psub">분기별 OKR 항목별 실적을 입력하고 제출합니다</div></div>
@@ -1688,7 +1797,15 @@ function pgMySubmit(){
 async function saveDraft(perfKey){
   const parts=perfKey.split('__'); const sid=parseInt(parts[0]); const qtr=parts[1];
   const kpiData={};
-  S.staffKPIs.forEach(k=>{kpiData[k.id]={content:g('kpi_content_'+k.id)?.value||'',count:parseInt(g('kpi_count_'+k.id)?.value)||0};});
+  S.staffKPIs.forEach(k=>{
+    const isSafety=isSafetyKPI(k);
+    kpiData[k.id]={
+      content:g('kpi_content_'+k.id)?.value||'',
+      count:isSafety?0:(parseInt(g('kpi_count_'+k.id)?.value)||0),
+      violations:isSafety?(parseInt(g('kpi_vio_'+k.id)?.value)||0):0,
+      lti:isSafety?(parseInt(g('kpi_lti_'+k.id)?.value)||0):0,
+    };
+  });
   S.performances[perfKey]={...S.performances[perfKey]||{},kpiData,status:'draft',quarter:qtr,staffId:sid};
   saveLocal();
   // Supabase 저장
@@ -1709,10 +1826,13 @@ async function submitPerf(perfKey){
   const kpiData={};
   let hasAny=false;
   S.staffKPIs.forEach(k=>{
+    const isSafety=isSafetyKPI(k);
     const v=g('kpi_content_'+k.id)?.value||'';
-    const cnt=parseInt(g('kpi_count_'+k.id)?.value)||0;
-    kpiData[k.id]={content:v,count:cnt};
-    if(v.trim()||cnt>0)hasAny=true;
+    const cnt=isSafety?0:(parseInt(g('kpi_count_'+k.id)?.value)||0);
+    const vio=isSafety?(parseInt(g('kpi_vio_'+k.id)?.value)||0):0;
+    const lti=isSafety?(parseInt(g('kpi_lti_'+k.id)?.value)||0):0;
+    kpiData[k.id]={content:v,count:cnt,violations:vio,lti};
+    if(v.trim()||cnt>0||vio>0||lti>0)hasAny=true;
   });
   if(!hasAny){toast('최소 1개 항목 이상 실적을 입력해주세요','warn');return;}
   const submittedAt=new Date().toLocaleDateString('ko-KR');
@@ -1783,6 +1903,41 @@ function pgMyRank(){
 }
 
 // ══════════════════════════════════════════
+//  자동 계산 실행
+// ══════════════════════════════════════════
+async function runAutoCalc(){
+  const n=autoCalcStaffGrades();
+  if(!n){ toast('제출된 실적 데이터가 없습니다','warn'); return; }
+  // DB에도 저장 (evaluations 테이블)
+  if(!DEMO_MODE && dbClient){
+    const now=new Date(); const yr=now.getFullYear(); const pd=now.getMonth()<6?'상반기':'하반기';
+    const batch=[];
+    S.staff.filter(s=>s.status==='approved').forEach(s=>{
+      const ekey='stf_'+s.id; const ev=S.staffEvals[ekey]||{};
+      S.staffKPIs.forEach(k=>{
+        if(ev['kpi_'+k.id]) batch.push({evaluatee_type:'staff',evaluatee_id:s.id,kpi_id:k.id,grade:ev['kpi_'+k.id],year:yr,period:pd});
+      });
+    });
+    if(batch.length){
+      try{ await dbClient.from('evaluations').upsert(batch,{onConflict:'evaluatee_type,evaluatee_id,kpi_id,year,period'}); }
+      catch(e){ console.warn('자동계산 DB저장 오류:',e.message); }
+    }
+  }
+  toast(`⚡ 자동 등급 계산 완료 (${S.staffKPIs.length}개 KPI × ${S.staff.filter(s=>s.status==='approved').length}명)`, 'success');
+  render();
+}
+
+// 안전 점수 실시간 미리보기
+function updateSafetyPreview(kpiId, vio, lti){
+  const score=Math.max(0,100-parseInt(vio||0)*2-parseInt(lti||0)*5);
+  const el=document.getElementById('safety_preview_'+kpiId);
+  if(el){
+    el.textContent='→ '+score+'점';
+    el.style.color=score>=80?'#065f46':score>=60?'#92400e':'#991b1b';
+  }
+}
+
+// ══════════════════════════════════════════
 //  항목별 순위 모달
 // ══════════════════════════════════════════
 function modalKPIBreakdown(staffId){
@@ -1813,7 +1968,9 @@ function modalKPIBreakdown(staffId){
         <div>
           <span style="font-size:12px;font-weight:600">${esc(k.name)}</span>
           <span style="font-size:10px;color:#888;margin-left:6px">${esc(k.obj)}</span>
-          ${d.count?`<span style="margin-left:6px;background:#ede9fe;color:#5b21b6;font-size:10px;padding:1px 6px;border-radius:10px">${d.count}건</span>`:''}
+          ${d.count?`<span style="margin-left:6px;background:#ede9fe;color:#5b21b6;font-size:10px;padding:1px 6px;border-radius:10px">실적 ${d.count}건</span>`:''}
+          ${isSafetyKPI(k)&&(d.violations||d.lti)?`<span style="margin-left:4px;background:#fee2e2;color:#991b1b;font-size:10px;padding:1px 6px;border-radius:10px">위반 ${d.violations||0}건 LTI ${d.lti||0}건 → ${kpiRawScore(staffId,k)}점</span>`:''}
+          ${isSafetyKPI(k)&&!(d.violations||d.lti)?`<span style="margin-left:4px;background:#d1fae5;color:#065f46;font-size:10px;padding:1px 6px;border-radius:10px">위반 없음 → 100점</span>`:''}
         </div>
         <div style="display:flex;align-items:center;gap:8px">
           <span class="badge ${gr?'b-'+gr:'b-none'}">${gr||'미평가'}</span>
