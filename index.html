@@ -216,7 +216,7 @@ body{font-family:-apple-system,'Apple SD Gothic Neo','Noto Sans KR',sans-serif;b
   <div class="mw">
     <div class="topbar">
       <div class="tb-l"><div class="tb-dot"></div><span id="tbEmail">—</span></div>
-      <div style="font-size:11px;color:#aaa"></div>
+      <div style="font-size:11px;color:#aaa">2026년 상반기</div>
     </div>
     <div class="content" id="content"></div>
   </div>
@@ -389,15 +389,70 @@ function kpiRankAmong(staffId, kpiId){
   return scores.findIndex(s=>s.id===staffId)+1;
 }
 
-// ── 자동 등급 배분: S:10% A:25% B:30% C:25% D:10% ──
-function gradeByPercentile(rank, total){
-  if(!total) return 'B';
-  const pct=(rank-0.5)/total; // 중앙값 기준 백분위
-  if(pct<=0.10) return 'S';
-  if(pct<=0.35) return 'A';
-  if(pct<=0.65) return 'B';
-  if(pct<=0.90) return 'C';
-  return 'D';
+// ── 등급 비율 S:10% A:30% B:55% C:3% D:2% ──
+const GRADE_RATIO = {S:0.10, A:0.30, B:0.55, C:0.03, D:0.02};
+const GRADE_ORDER = ['S','A','B','C','D'];
+
+// 제출 여부 확인
+function hasSubmittedKPI(staffId, kpiId){
+  const d=getPerf(staffId)?.kpiData?.[kpiId]||{};
+  return d.count>0||d.violations!==undefined||d.lti!==undefined||d.content?.trim();
+}
+
+// 제출한 센터원만 필터
+function submittedStaff(kpiId){
+  return S.staff.filter(s=>s.status==='approved'&&hasSubmittedKPI(s.id,kpiId));
+}
+
+// KPI별 개인 순위 {rank, total} - 제출자 기준
+function getKPIRank(staffId, k){
+  const pool=submittedStaff(k.id);
+  if(!pool.length) return null;
+  const scores=pool.map(s=>({id:s.id,score:kpiRawScore(s.id,k)})).sort((a,b)=>b.score-a.score);
+  const idx=scores.findIndex(s=>s.id===staffId);
+  return idx===-1?null:{rank:idx+1,total:pool.length};
+}
+
+// 종합 순위 (등급 기준 종합점수)
+function getOverallRank(staffId){
+  const pool=S.staff.filter(s=>s.status==='approved');
+  const scored=pool.map(s=>{const ekey='stf_'+s.id;return{id:s.id,score:calcScore(S.staffEvals[ekey]||{},S.staffKPIs,ekey)||0};}).sort((a,b)=>b.score-a.score);
+  const idx=scored.findIndex(s=>s.id===staffId);
+  // 제출한 사람만 카운트
+  const subPool=pool.filter(s=>S.staffKPIs.some(k=>hasSubmittedKPI(s.id,k.id)));
+  return{rank:idx+1,total:subPool.length||pool.length};
+}
+
+// ★ 동점자 처리 포함 등급 자동 배분
+function calcGradesWithTieBreak(pool, kpiObj){
+  const n=pool.length; if(!n) return {};
+  // 쿼터 계산
+  const quotas=GRADE_ORDER.map(g=>({grade:g,q:Math.round(n*GRADE_RATIO[g])}));
+  // 합산 보정 (반올림 오차)
+  const diff=n-quotas.reduce((a,x)=>a+x.q,0);
+  quotas[2].q+=diff; // B에 잉여 배정
+  // 원점수 계산 후 정렬
+  const scored=pool.map(s=>({id:s.id,score:kpiRawScore(s.id,kpiObj)})).sort((a,b)=>b.score-a.score);
+  // 동점 그룹화
+  const groups=[]; let cur=[scored[0]];
+  for(let i=1;i<scored.length;i++){
+    if(scored[i].score===scored[i-1].score) cur.push(scored[i]);
+    else{groups.push(cur);cur=[scored[i]];}
+  }
+  groups.push(cur);
+  // 동점 처리: 그룹이 현재 등급 잔여보다 크면 다음 등급으로
+  const result={}; let gi=0; let rem=quotas[0].q;
+  for(const group of groups){
+    // 잔여가 0이면 다음 등급으로
+    while(gi<quotas.length&&rem===0){gi++;rem=gi<quotas.length?quotas[gi].q:0;}
+    // 그룹이 잔여보다 많으면 → 다음 등급으로 (동점자 전원 하향)
+    while(gi<quotas.length-1&&group.length>rem){gi++;rem=quotas[gi].q;}
+    const grade=gi<quotas.length?quotas[gi].grade:'D';
+    group.forEach(s=>{result[s.id]=grade;});
+    rem-=group.length;
+    if(rem<0){rem=0;}
+  }
+  return result;
 }
 
 // 안전 KPI 여부 판단
@@ -417,23 +472,21 @@ function kpiRawScore(staffId, k){
   return parseInt(d.count||0);
 }
 
-// ★ 전체 자동 등급 계산 (센터원 제출 건수 기반 상대평가)
+// ★ 전체 자동 등급 계산 (S:10% A:30% B:55% C:3% D:2% + 동점자 하향)
 function autoCalcStaffGrades(){
   const allStaff=S.staff.filter(s=>s.status==='approved');
   if(!allStaff.length){ toast('평가할 센터원이 없습니다','warn'); return 0; }
   let updated=0;
   S.staffKPIs.forEach(k=>{
-    // 각 센터원의 이 KPI 원점수 수집
-    const scored=allStaff.map(s=>({id:s.id, raw:kpiRawScore(s.id,k)}));
-    // 동점 처리: 같은 점수는 같은 순위
-    const sortedUniq=[...new Set(scored.map(x=>x.raw))].sort((a,b)=>b-a);
-    scored.forEach(item=>{
-      const rank=sortedUniq.indexOf(item.raw)+1;
-      const grade=item.raw===0&&!isSafetyKPI(k)?null:gradeByPercentile(rank, sortedUniq.length);
-      if(!grade) return; // 0건 미제출은 등급 미부여
-      const ekey='stf_'+item.id;
+    // 제출한 센터원만 대상 (미제출자 제외)
+    const pool=submittedStaff(k.id);
+    if(!pool.length) return;
+    const grades=calcGradesWithTieBreak(pool,k);
+    pool.forEach(s=>{
+      if(!grades[s.id]) return;
+      const ekey='stf_'+s.id;
       if(!S.staffEvals[ekey]) S.staffEvals[ekey]={};
-      S.staffEvals[ekey]['kpi_'+k.id]=grade;
+      S.staffEvals[ekey]['kpi_'+k.id]=grades[s.id];
       updated++;
     });
   });
@@ -1051,18 +1104,21 @@ function pgAdminRanking(){
   let list=cf==='all'?S.staff.filter(s=>s.status==='approved'):S.staff.filter(s=>s.status==='approved'&&s.centerId===parseInt(cf));
   const scored=list.map(s=>{const ekey='stf_'+s.id;return{...s,score:calcScore(S.staffEvals[ekey]||{},S.staffKPIs,ekey),grade:getGrade(calcScore(S.staffEvals[ekey]||{},S.staffKPIs,ekey))};}).sort((a,b)=>(b.score||0)-(a.score||0));
   const cOpts=`<option value="all">전체 센터</option>`+S.centers.map(c=>`<option value="${c.id}"${c.id===parseInt(cf)?' selected':''}>${esc(c.name)}</option>`).join('');
+  const kpiHdrA=S.staffKPIs.map(k=>`<th style="text-align:center;font-size:10px;white-space:nowrap">${esc(k.name.substring(0,5))}</th>`).join('');
   const rows=scored.length?scored.map((s,i)=>{
     const rank=i+1;
+    const kpiColsA=S.staffKPIs.map(k=>{const r=getKPIRank(s.id,k);return`<td style="text-align:center;font-size:11px;font-weight:600;color:${r&&r.rank===1?'#92400e':r&&r.rank<=Math.ceil((r.total||1)*0.1)?'#92400e':r&&r.rank<=Math.ceil((r.total||1)*0.4)?'#1e40af':'#6b7280'}">${r?r.rank+'/'+r.total:'—'}</td>`;}).join('');
     return`<tr><td><div class="rbox ${rank===1?'rk1':rank===2?'rk2':rank===3?'rk3':'rkn'}">${rank}</div></td>
     <td><div style="display:flex;align-items:center;gap:7px"><div class="av av-pk">${s.name[0]}</div><span style="font-weight:600">${esc(s.name)}</span></div></td>
     <td style="font-size:11px">${esc(getCenterName(s.centerId))}</td>
     <td style="text-align:center;font-weight:700">${s.score!==null?s.score+'점':'—'}</td>
     <td style="text-align:center"><span class="badge ${s.grade?'b-'+s.grade:'b-none'}">${s.grade||'—'}</span></td>
+    ${kpiColsA}
     <td>
-      <button class="btn btn-outline btn-xs" onclick="modalStaffEvalAdmin(${s.id})">평가 입력</button>
-      <button class="btn btn-blue btn-xs" onclick="modalKPIBreakdown(${s.id})" style="margin-left:4px">항목별</button>
+      <button class="btn btn-outline btn-xs" onclick="modalStaffEvalAdmin(${s.id})">평가</button>
+      <button class="btn btn-blue btn-xs" onclick="modalKPIBreakdown(${s.id})" style="margin-left:3px">상세</button>
     </td></tr>`;
-  }).join(''):`<tr><td colspan="6" class="empty">센터원 데이터 없음</td></tr>`;
+  }).join(''):`<tr><td colspan="${6+S.staffKPIs.length}" class="empty">센터원 데이터 없음</td></tr>`;
   return`<div class="ph"><div class="ptitle">센터원 순위 조회</div><div class="psub">전체 센터원 OKR 평가 점수 및 순위 (본부장 전체 공개)</div></div>
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">
     <select class="fi" style="width:220px" onchange="S.tab.adminRankCenter=this.value;render()">${cOpts}</select>
@@ -1311,7 +1367,10 @@ function pgStaffManage(){
   const rows=list.length?list.map(s=>`<tr>
     <td><div style="display:flex;align-items:center;gap:7px"><div class="av av-pk">${s.name[0]}</div><span style="font-weight:600">${esc(s.name)}</span></div></td>
     <td style="font-size:11px;color:#888">${esc(s.email)}</td><td>${s.joinDate||'—'}</td>
-    <td><button class="btn btn-red btn-xs" onclick="deleteStaffByMgr(${s.id})">삭제</button></td>
+    <td>
+      <button class="btn btn-outline btn-xs" onclick="modalMoveCenter(${s.id})">센터 이동</button>
+      <button class="btn btn-red btn-xs" onclick="deleteStaffByMgr(${s.id})" style="margin-left:4px">삭제</button>
+    </td>
   </tr>`).join(''):`<tr><td colspan="4" class="empty">소속 센터원 없음</td></tr>`;
   return`<div class="ph"><div class="ptitle">센터원 관리</div><div class="psub">소속 센터원을 관리합니다</div></div>
   <div class="card"><div class="sh"><div class="stit">소속 센터원</div><button class="btn btn-pink btn-sm" onclick="modalAddStaffMgr()">+ 추가</button></div>
@@ -1408,6 +1467,30 @@ async function deleteStaffByMgr(id){
   S.staff=S.staff.filter(x=>x.id!==id);
   await dbDelete('staff','id',id);
   toast('삭제되었습니다','info'); render();
+}
+function modalMoveCenter(staffId){
+  const s=S.staff.find(x=>x.id===staffId);
+  const opts=S.centers.map(c=>`<option value="${c.id}"${c.id===(s.centerId||s.center_id)?' selected':''}>${esc(c.name)}</option>`).join('');
+  showModal(`<div class="mtitle">센터원 센터 이동</div>
+  <div style="font-size:12px;color:#888;margin-bottom:14px">${esc(s.name)} 님의 소속 센터를 변경합니다</div>
+  <div style="background:#fef3c7;border-radius:8px;padding:10px 12px;font-size:11px;color:#92400e;margin-bottom:14px">
+    현재 소속: <strong>${esc(getCenterName(s.centerId||s.center_id))}</strong>
+  </div>
+  <div class="fg"><label class="fl">변경할 센터 *</label><select class="fs" id="mc_center">${opts}</select></div>
+  <div class="mfoot"><button class="btn btn-gray" onclick="closeModal()">취소</button><button class="btn btn-pink" onclick="doMoveCenter(${staffId})">이동 확정</button></div>`);
+}
+async function doMoveCenter(staffId){
+  const newCid=parseInt(g('mc_center')?.value);
+  if(!newCid) return;
+  const s=S.staff.find(x=>x.id===staffId);
+  if(s){ s.centerId=newCid; s.center_id=newCid; }
+  await dbUpdate('staff',{center_id:newCid},'id',staffId);
+  // profiles도 업데이트
+  if(!DEMO_MODE && dbClient){
+    try{ await dbClient.from('profiles').update({center_id:newCid}).eq('staff_id',staffId); }catch(e){}
+  }
+  toast(s?.name+' → '+getCenterName(newCid)+' 이동 완료');
+  closeModal(); render();
 }
 
 function pgAgreement(){
@@ -1593,16 +1676,20 @@ function pgCenterRank(){
   const cid=S.user.centerId;
   const list=S.staff.filter(s=>s.centerId===cid&&s.status==='approved');
   const scored=list.map(s=>{const ekey='stf_'+s.id;return{...s,score:calcScore(S.staffEvals[ekey]||{},S.staffKPIs,ekey),grade:getGrade(calcScore(S.staffEvals[ekey]||{},S.staffKPIs,ekey))};}).sort((a,b)=>(b.score||0)-(a.score||0));
+  const kpiHdr=S.staffKPIs.map(k=>`<th style="text-align:center;font-size:10px;white-space:nowrap">${esc(k.name.substring(0,5))}<br><span style="color:#aaa">${k.weight}%</span></th>`).join('');
+  const kpiTotal=submittedStaff(S.staffKPIs[0]?.id||1).length||scored.length;
   const rows=scored.length?scored.map((s,i)=>{
     const rank=i+1;
+    const kpiCols=S.staffKPIs.map(k=>{const r=getKPIRank(s.id,k);return`<td style="text-align:center;font-size:11px;font-weight:600;color:${r&&r.rank<=Math.ceil(r.total*0.1)?'#92400e':r&&r.rank<=Math.ceil(r.total*0.4)?'#1e40af':'#374151'}">${r?r.rank+'/'+r.total:'—'}</td>`;}).join('');
     return`<tr><td><div class="rbox ${rank===1?'rk1':rank===2?'rk2':rank===3?'rk3':'rkn'}">${rank}</div></td>
     <td><div style="display:flex;align-items:center;gap:7px"><div class="av av-pk">${s.name[0]}</div><span style="font-weight:600">${esc(s.name)}</span></div></td>
     <td style="text-align:center;font-weight:700">${s.score!==null?s.score+'점':'—'}</td>
     <td style="text-align:center"><span class="badge ${s.grade?'b-'+s.grade:'b-none'}">${s.grade||'—'}</span></td>
-    <td><button class="btn btn-outline btn-xs" onclick="modalKPIBreakdown(${s.id})">항목별 순위</button></td></tr>`;
-  }).join(''):`<tr><td colspan="5" class="empty">평가 데이터 없음</td></tr>`;
-  return`<div class="ph"><div class="ptitle">센터원 순위 조회</div><div class="psub">소속 센터원 전체 OKR 순위 · 항목별 순위 버튼으로 KPI별 기여 점수와 순위를 확인하세요</div></div>
-  <div class="card"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>순위</th><th>이름</th><th>종합 점수</th><th>등급</th><th>상세</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+    ${kpiCols}
+    <td><button class="btn btn-outline btn-xs" onclick="modalKPIBreakdown(${s.id})">상세</button></td></tr>`;
+  }).join(''):`<tr><td colspan="${4+S.staffKPIs.length+1}" class="empty">평가 데이터 없음</td></tr>`;
+  return`<div class="ph"><div class="ptitle">센터원 순위 조회</div><div class="psub">항목별 순위: 순위/전체제출인원 형식 · 상위 순위는 파란색 표시</div></div>
+  <div class="card"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>순위</th><th>이름</th><th>종합점수</th><th>등급</th>${kpiHdr}<th>상세</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
 }
 
 // ══════════════════════════════════════════
@@ -1638,11 +1725,17 @@ function pgStaffDashboard(){
     </div>
     <div style="margin-top:10px;font-size:12px">${stBadge}</div>
   </div>
-  <div class="qg3">
+  ${(()=>{const or=sid?getOverallRank(sid):{rank:0,total:0};
+    return`<div class="qg3">
     <div class="qc" onclick="go('my-submit')"><div class="qi ic-green">📋</div><h4>실적 제출</h4><p>분기별 실적 데이터 제출</p></div>
     <div class="qc" onclick="go('my-rank')"><div class="qi ic-orange">📊</div><h4>내 순위</h4><p>내 평가 순위 확인</p></div>
-    <div class="sc" style="cursor:default"><div class="sn ${fg?'b-'+fg:''}" style="font-size:28px">${score!==null?score:'—'}<span style="font-size:14px;color:#aaa">${score!==null?'점':''}</span></div><div class="sl">내 종합 점수</div><span class="stag ${fg?'b-'+fg:'b-none'}">${fg||'미평가'}</span></div>
-  </div>
+    <div class="sc" style="cursor:pointer" onclick="go('my-rank')">
+      ${or.total?`<div style="font-size:32px;font-weight:900;color:#e91e8c;line-height:1">${or.rank}<span style="font-size:16px;font-weight:400;color:#888">등</span></div>
+      <div style="font-size:12px;color:#888;margin-top:4px">전체 ${or.total}명 중</div>
+      <div style="font-size:11px;color:#aaa;margin-top:2px">(제출 완료 기준)</div>`
+      :`<div style="font-size:22px;color:#aaa">—</div><div style="font-size:11px;color:#aaa">실적 제출 후 표시</div>`}
+    </div>
+  </div>`;})()}
   <div class="card"><div class="sh"><div class="stit">내 정보</div></div>
   <div style="padding:14px 16px"><table class="info-tbl">
     <tr><td>이름</td><td>${esc(S.user.name)}</td></tr>
@@ -1851,54 +1944,57 @@ async function submitPerf(perfKey){
   toast(`${qtr} 실적이 제출되었습니다`);render();
 }
 function pgMyRank(){
-  // 전체 순위 (익명 처리 - 본인만 이름 공개)
   let sid=S.user.staffId;
   if(!sid){ const f=S.staff.find(s=>s.email===S.user.email); if(f){sid=f.id;S.user.staffId=f.id;} }
   const allApproved=S.staff.filter(s=>s.status==='approved');
-  const scored=allApproved.map(s=>{
-    const ekey='stf_'+s.id;
-    return{id:s.id,name:s.name,centerId:s.centerId,isMe:s.id===sid,
-      score:calcScore(S.staffEvals[ekey]||{},S.staffKPIs,ekey),
-      grade:getGrade(calcScore(S.staffEvals[ekey]||{},S.staffKPIs,ekey))};
-  }).sort((a,b)=>(b.score||0)-(a.score||0));
+  // 종합 순위 (제출자 기준)
+  const subPool=allApproved.filter(s=>S.staffKPIs.some(k=>hasSubmittedKPI(s.id,k.id)));
+  const scored=subPool.map(s=>{const ekey='stf_'+s.id;return{id:s.id,name:s.name,centerId:s.centerId,isMe:s.id===sid,score:calcScore(S.staffEvals[ekey]||{},S.staffKPIs,ekey)||0};}).sort((a,b)=>b.score-a.score);
+  const myRank=(scored.findIndex(s=>s.isMe)+1)||0;
+  const total=scored.length;
 
-  const myRank=scored.findIndex(s=>s.isMe)+1;
-  const me=scored.find(s=>s.isMe);
+  // 항목별 순위
+  const kpiRankCards=S.staffKPIs.map(k=>{
+    const r=sid?getKPIRank(sid,k):null;
+    return`<div style="background:white;border:1px solid #eee;border-radius:9px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <div style="font-size:12px;font-weight:600;color:#111">${esc(k.name)}</div>
+        <div style="font-size:10px;color:#888">${esc(k.obj)} · ${k.weight}%</div>
+      </div>
+      ${r?`<div style="text-align:right">
+        <div style="font-size:18px;font-weight:900;color:#e91e8c">${r.rank}<span style="font-size:12px;color:#888">/${r.total}</span></div>
+        <div style="font-size:10px;color:#aaa">항목 내 순위</div>
+      </div>`:`<span style="font-size:11px;color:#aaa">미제출</span>`}
+    </div>`;
+  }).join('');
 
+  // 전체 순위표 (본인만 공개)
   const rows=scored.map((s,i)=>{
-    const rank=i+1;
-    const isMe=s.isMe;
+    const rank=i+1; const isMe=s.isMe;
     return`<tr class="${isMe?'own-row':''}">
     <td><div class="rbox ${rank===1?'rk1':rank===2?'rk2':rank===3?'rk3':'rkn'}">${rank}</div></td>
-    <td>${isMe
-      ?`<div style="display:flex;align-items:center;gap:7px"><div class="av av-pk">${s.name[0]}</div><span style="font-weight:700;color:#e91e8c">${esc(s.name)} 👈 나</span></div>`
-      :`<div style="display:flex;align-items:center;gap:7px"><div class="av" style="background:#f3f4f6;color:#9ca3af">?</div><span style="color:#9ca3af">익 명</span></div>`
-    }</td>
+    <td>${isMe?`<div style="display:flex;align-items:center;gap:7px"><div class="av av-pk">${s.name[0]}</div><span style="font-weight:700;color:#e91e8c">${esc(s.name)} 👈 나</span></div>`
+    :`<div style="display:flex;align-items:center;gap:7px"><div class="av" style="background:#f3f4f6;color:#9ca3af">?</div><span style="color:#9ca3af">익 명</span></div>`}</td>
     <td style="font-size:11px;color:#888">${isMe?esc(getCenterName(s.centerId)):'—'}</td>
-    <td style="text-align:center;font-weight:${isMe?'700':'400'};color:${isMe?'#111':'#9ca3af'}">${isMe&&s.score!==null?s.score+'점':'•'}</td>
-    <td style="text-align:center"><span class="badge ${isMe&&s.grade?'b-'+s.grade:'b-none'}">${isMe&&s.grade?s.grade:'•'}</span></td>
-    <td>${isMe?`<button class="btn btn-outline btn-xs" onclick="modalKPIBreakdown(${s.id})">항목별 순위</button>`:''}</td>
     </tr>`;
   }).join('');
 
-  return`<div class="ph"><div class="ptitle">내 순위</div><div class="psub">전체 센터원 기준 나의 위치 (타인 정보는 익명 처리됩니다)</div></div>
-  <div style="background:linear-gradient(135deg,#fce7f3,white);border:1px solid #f9a8d4;border-radius:12px;padding:18px 20px;margin-bottom:16px;display:flex;align-items:center;gap:20px">
-    <div style="text-align:center;min-width:80px">
-      <div style="font-size:40px;font-weight:900;color:#e91e8c">${myRank}위</div>
-      <div style="font-size:11px;color:#888">전체 ${scored.length}명 중</div>
+  return`<div class="ph"><div class="ptitle">내 순위</div><div class="psub">전체 센터원 기준 나의 위치 (타인 정보 비공개)</div></div>
+  <div style="background:linear-gradient(135deg,#fce7f3,white);border:1px solid #f9a8d4;border-radius:12px;padding:20px;margin-bottom:16px;display:flex;align-items:center;gap:20px">
+    <div style="text-align:center;min-width:90px">
+      <div style="font-size:48px;font-weight:900;color:#e91e8c;line-height:1">${myRank||'—'}</div>
+      <div style="font-size:12px;color:#888;margin-top:2px">${total?`전체 ${total}명 중`:'(미제출)'}</div>
     </div>
     <div style="flex:1">
       <div style="font-size:15px;font-weight:700;color:#111;margin-bottom:4px">${esc(S.user.name)}</div>
-      <div style="font-size:13px;color:#555;margin-bottom:8px">${esc(getCenterName(S.user.centerId))}</div>
-      <div style="display:flex;gap:10px">
-        <span style="font-size:22px;font-weight:700;color:#111">${me?.score!==null?me?.score+'점':'—'}</span>
-        <span class="badge ${me?.grade?'b-'+me?.grade:'b-none'}" style="font-size:14px;padding:5px 14px">${me?.grade||'미평가'}</span>
-      </div>
+      <div style="font-size:13px;color:#555">${esc(getCenterName(S.user.centerId))}</div>
     </div>
   </div>
+  <div style="font-size:12px;font-weight:700;color:#555;margin-bottom:10px">📊 항목별 순위</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:18px">${kpiRankCards}</div>
   <div class="card">
-    <div class="sh"><div class="stit">전체 순위 (개인 정보 보호)</div><div class="ssub">본인 외 이름·점수·등급 비공개</div></div>
-    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>순위</th><th>이름</th><th>소속</th><th>점수</th><th>등급</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="sh"><div class="stit">전체 순위</div><div class="ssub">본인 외 이름 비공개 · 등급·점수 미표시</div></div>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>순위</th><th>이름</th><th>소속</th></tr></thead><tbody>${rows}</tbody></table></div>
   </div>`;
 }
 
