@@ -1485,17 +1485,35 @@ async function addStaffByMgr(){
       closeModal();render();return;
     }
 
-    // ③ profiles 업데이트 (트리거가 생성한 행을 UPDATE)
+    // ③ profiles 업데이트
     if(authUserId){
-      await new Promise(r=>setTimeout(r,600));
-      try{
-        await dbClient.from('profiles').update({
-          name:nm, role:'staff', title:'센터원',
-          org:getCenterName(cid), center_id:cid,
-          staff_id:staffRow.id, manager_id:S.user.managerId||null,
-          must_change_password:true,
-        }).eq('id',authUserId);
-      }catch(pe){ console.warn('profiles 업데이트 오류:',pe.message); }
+      // 현재 로그인 센터장 정보
+      const mgrCenterId = S.user.centerId;
+      const mgrCenterName = getCenterName(mgrCenterId);
+      const mgrId = S.user.managerId || S.managers.find(m=>m.email===S.user.email)?.id || null;
+      const profileData = {
+        name: nm,
+        role: 'staff',
+        title: '센터원',
+        org: mgrCenterName,
+        center_id: mgrCenterId,
+        staff_id: staffRow.id,
+        manager_id: mgrId,
+        must_change_password: true,
+      };
+      console.log('[profiles 업데이트]', authUserId, profileData);
+      await new Promise(r=>setTimeout(r,800)); // 트리거 대기
+      // UPDATE 시도
+      const {error:upErr} = await dbClient.from('profiles').update(profileData).eq('id',authUserId);
+      if(upErr){
+        console.warn('profiles UPDATE 실패:', upErr.message);
+        // UPDATE 실패 시 INSERT 시도 (트리거가 안 돌았을 경우)
+        const {error:insErr} = await dbClient.from('profiles').insert({id:authUserId, ...profileData});
+        if(insErr) console.warn('profiles INSERT도 실패:', insErr.message);
+        else console.log('profiles INSERT 성공');
+      } else {
+        console.log('profiles UPDATE 성공');
+      }
     }
 
     S.staff.push({id:staffRow.id,name:nm,email:em,centerId:cid,joinDate:jd,status:'approved'});
@@ -1529,10 +1547,25 @@ function showAuthManualGuide(nm,em,pw){
   <div class="mfoot"><button class="btn btn-pink" onclick="closeModal()">확인</button></div>`),200);
 }
 async function deleteStaffByMgr(id){
-  if(!confirm('센터원을 삭제하시겠습니까?')) return;
+  if(!confirm('센터원을 삭제하시겠습니까?\n(계정 및 모든 데이터가 삭제됩니다)')) return;
+  const s=S.staff.find(x=>x.id===id);
+  if(!DEMO_MODE && dbClient && s){
+    // ① performances, agreements, reviews 삭제
+    await dbClient.from('performances').delete().eq('staff_id',id).catch(()=>{});
+    await dbClient.from('agreements').delete().eq('staff_id',id).catch(()=>{});
+    await dbClient.from('reviews').delete().eq('staff_id',id).catch(()=>{});
+    await dbClient.from('evaluations').delete().eq('evaluatee_id',id).eq('evaluatee_type','staff').catch(()=>{});
+    // ② profiles 삭제 (staff_id 기준)
+    const {error:pErr}=await dbClient.from('profiles').delete().eq('staff_id',id);
+    if(pErr) console.warn('profiles 삭제 오류:',pErr.message);
+    // ③ staff 삭제
+    await dbDelete('staff','id',id);
+  } else {
+    await dbDelete('staff','id',id);
+  }
   S.staff=S.staff.filter(x=>x.id!==id);
-  await dbDelete('staff','id',id);
-  toast('삭제되었습니다','info'); render();
+  toast(s?.name+' 센터원이 삭제되었습니다','info');
+  render();
 }
 function modalMoveCenter(staffId){
   const s=S.staff.find(x=>x.id===staffId);
