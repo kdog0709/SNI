@@ -231,8 +231,11 @@ body{font-family:-apple-system,'Apple SD Gothic Neo','Noto Sans KR',sans-serif;b
 // ══════════════════════════════════════════
 //  SUPABASE (설정 전 데모 모드로 동작)
 // ══════════════════════════════════════════
-const SUPABASE_URL  = 'https://YOUR_PROJECT_ID.supabase.co';
-const SUPABASE_ANON = 'YOUR_ANON_PUBLIC_KEY';
+//const SUPABASE_URL  = 'https://YOUR_PROJECT_ID.supabase.co';
+//const SUPABASE_ANON = 'YOUR_ANON_PUBLIC_KEY';
+const SUPABASE_URL  = 'https://wdbndirmgzvcshoioqet.supabase.co';   // ← 교체
+const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndkYm5kaXJtZ3p2Y3Nob2lvcWV0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMzE2NzUsImV4cCI6MjA5MTYwNzY3NX0.HuWhoBPhcHZmGS2wFu8vWA402hu3n-OCA0KYVxC9CAQ';                  // ← 교체
+
 const DEMO_MODE = SUPABASE_URL.includes('YOUR_PROJECT_ID');
 let dbClient = DEMO_MODE ? null : window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
 
