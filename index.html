@@ -396,7 +396,7 @@ const GRADE_ORDER = ['S','A','B','C','D'];
 // 제출 여부 확인
 function hasSubmittedKPI(staffId, kpiId){
   const d=getPerf(staffId)?.kpiData?.[kpiId]||{};
-  return d.count>0||d.violations!==undefined||d.lti!==undefined||d.content?.trim();
+  return d.count>0||d.violations!==undefined||d.lti!==undefined||d.omission!==undefined||d.edge_rate!==undefined||d.content?.trim();
 }
 
 // 제출한 센터원만 필터
@@ -457,19 +457,35 @@ function calcGradesWithTieBreak(pool, kpiObj){
 
 // 안전 KPI 여부 판단
 function isSafetyKPI(k){ return k.obj==='안전관리'&&(k.name.includes('이행율')||k.name.includes('ZERO')); }
+// 업무누락 + 엣지 이행율 KPI 여부
+function isOmissionKPI(k){ return k.name.includes('업무누락')&&k.name.includes('엣지'); }
 
 // KPI별 실적 원점수 계산
 function kpiRawScore(staffId, k){
   const perf=getPerf(staffId);
   const d=perf?.kpiData?.[k.id]||{};
+
   if(isSafetyKPI(k)){
     // 안전: 100점 기준 위반 건수 감점
     const vio=parseInt(d.violations||d.count||0);
     const lti=parseInt(d.lti||0);
     return Math.max(0, 100 - vio*2 - lti*5);
   }
+
+  if(isOmissionKPI(k)){
+    // 업무누락 + 엣지 이행율: 엣지이행율% 기준 - 업무누락 건수 감점
+    const edgeRate=parseFloat(d.edge_rate||0);   // 0~100 (%)
+    const omission=parseInt(d.omission||0);      // 업무누락 건수
+    return Math.max(0, edgeRate - omission*10);  // 누락 1건 = -10점
+  }
+
   // 일반: 건수 (클수록 좋음)
   return parseInt(d.count||0);
+}
+
+// 업무누락 KPI 점수 미리보기
+function calcOmissionPreview(edgeRate, omission){
+  return Math.max(0, parseFloat(edgeRate||0) - parseInt(omission||0)*10);
 }
 
 // ★ 전체 자동 등급 계산 (S:10% A:30% B:55% C:3% D:2% + 동점자 하향)
@@ -915,6 +931,13 @@ async function saveMgr(){
         else throw authErr;
       } else {
         authUserId=authData?.user?.id||authData?.session?.user?.id;
+        // 이메일 인증 즉시 처리
+        if(authUserId||authData?.user){
+          try{
+            await dbClient.rpc('confirm_user_email',{user_email:em});
+            console.log('센터장 이메일 확인 처리 완료');
+          }catch(re){ console.warn('이메일 확인 RPC 실패 (무시):',re.message); }
+        }
       }
     }catch(authE){
       console.warn('[Auth 오류]',authE.message);
@@ -1153,12 +1176,14 @@ function modalStaffEvalAdmin(staffId){
   const kpiRows=S.staffKPIs.map(k=>{
     const d=perf?.kpiData?.[k.id]||{};
     const contrib=kpiContrib(ev['kpi_'+k.id],k.weight);
+    const isOmission=isOmissionKPI(k);
     return`<div style="padding:10px 0;border-bottom:1px solid #f5f5f5">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:${d.content||d.count?'6px':'0'}">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:${(d.content||d.count||d.omission!==undefined)?'6px':'0'}">
       <div>
         <span style="font-size:12px;font-weight:600">${esc(k.name)}</span>
         <span style="font-size:10px;color:#888;margin-left:6px">${esc(k.obj)}·${k.weight}%</span>
         ${d.count?`<span style="margin-left:8px;background:#ede9fe;color:#5b21b6;font-size:10px;font-weight:700;padding:2px 7px;border-radius:12px">실적 ${d.count}건</span>`:''}
+        ${isOmission?`<span style="margin-left:6px;background:#fee2e2;color:#991b1b;font-size:10px;padding:1px 6px;border-radius:10px">누락 ${d.omission||0}건</span><span style="margin-left:4px;background:#d1fae5;color:#065f46;font-size:10px;padding:1px 6px;border-radius:10px">엣지 ${d.edge_rate||100}%</span><span style="margin-left:4px;background:#eff6ff;color:#1e40af;font-size:10px;font-weight:700;padding:1px 6px;border-radius:10px">→ ${calcOmissionPreview(d.edge_rate||100,d.omission||0)}점</span>`:''}
       </div>
       <div style="display:flex;align-items:center;gap:8px">
         <div class="gbrow">${['S','A','B','C','D'].map(gr=>`<button class="gbtn${ev['kpi_'+k.id]===gr?' g'+gr:''}" onclick="setGrade('${ekey}',${k.id},'${gr}',this)">${gr}</button>`).join('')}</div>
@@ -1467,7 +1492,6 @@ async function addStaffByMgr(){
         }
       });
       if(authErr){
-        // 이미 등록된 이메일인 경우 → 기존 유저 찾기
         if(authErr.message?.includes('already registered')||authErr.message?.includes('already been registered')){
           toast('⚠ 이미 등록된 이메일입니다. staff 정보만 업데이트됩니다.','warn');
         } else {
@@ -1475,6 +1499,13 @@ async function addStaffByMgr(){
         }
       } else {
         authUserId=authData?.user?.id||authData?.session?.user?.id;
+        // 이메일 인증 즉시 처리 (confirm email 비활성화 대안)
+        if(authUserId||authData?.user){
+          try{
+            await dbClient.rpc('confirm_user_email',{user_email:em});
+            console.log('이메일 확인 처리 완료');
+          }catch(re){ console.warn('이메일 확인 RPC 실패 (무시):',re.message); }
+        }
       }
     }catch(authE){
       // Auth 생성 실패해도 staff 등록은 완료 처리
@@ -1912,7 +1943,7 @@ function pgMySubmit(){
     const isSafety=isSafetyKPI(k);
     const vio=d.violations||0; const lti=d.lti||0;
     const safetyScore=isSafety?Math.max(0,100-vio*2-lti*5):null;
-    const hasContent=!!(d.content||d.count||d.violations||d.lti);
+    const hasContent=!!(d.content||d.count||d.violations||d.lti||d.omission!==undefined||d.edge_rate!==undefined);
     return`<div class="perf-kpi" style="border-left:3px solid ${hasContent?'#10b981':'#e5e7eb'}">
     <div class="perf-kpi-head">
       <div>
@@ -1948,7 +1979,32 @@ function pgMySubmit(){
             → ${safetyScore}점
           </span>
         </div>
-      </div>`:`
+      </div>`
+      : isOmissionKPI(k)?`
+      <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 12px;margin-bottom:8px">
+        <div style="font-size:11px;font-weight:700;color:#1e3a8a;margin-bottom:8px">📋 업무누락 + 엣지 이행율 입력</div>
+        <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+          <div style="display:flex;align-items:center;gap:6px">
+            <label style="font-size:11px;font-weight:600;color:#ef4444;white-space:nowrap">업무누락 건수</label>
+            <input type="number" class="fi" id="kpi_omission_${k.id}" ${disabled?'disabled':''} min="0"
+              style="width:64px;text-align:center" value="${parseInt(d.omission||0)}"
+              oninput="updateOmissionPreview(${k.id})">
+            <span style="font-size:11px;color:#888">건 (-10점/건)</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px">
+            <label style="font-size:11px;font-weight:600;color:#10b981;white-space:nowrap">엣지 이행율</label>
+            <input type="number" class="fi" id="kpi_edge_${k.id}" ${disabled?'disabled':''} min="0" max="100"
+              style="width:72px;text-align:center" value="${parseFloat(d.edge_rate||100)}"
+              oninput="updateOmissionPreview(${k.id})">
+            <span style="font-size:11px;color:#888">%</span>
+          </div>
+          <span id="omission_preview_${k.id}" style="font-size:13px;font-weight:700;color:${calcOmissionPreview(d.edge_rate||100,d.omission||0)>=80?'#065f46':calcOmissionPreview(d.edge_rate||100,d.omission||0)>=60?'#92400e':'#991b1b'}">
+            → ${calcOmissionPreview(d.edge_rate||100,d.omission||0)}점
+          </span>
+        </div>
+        <div style="font-size:10px;color:#6b7280;margin-top:6px">산정식: 엣지 이행율(%) − 업무누락 건수 × 10점 (최저 0점)</div>
+      </div>`
+      :`
       <div style="display:flex;gap:10px;margin-bottom:8px;align-items:center">
         <label style="font-size:11px;font-weight:600;color:#555;white-space:nowrap">실적 건수</label>
         <input type="number" class="fi" id="kpi_count_${k.id}" ${disabled?'disabled':''} min="0"
@@ -1991,11 +2047,14 @@ async function saveDraft(perfKey){
   const kpiData={};
   S.staffKPIs.forEach(k=>{
     const isSafety=isSafetyKPI(k);
+    const isOmission=isOmissionKPI(k);
     kpiData[k.id]={
       content:g('kpi_content_'+k.id)?.value||'',
-      count:isSafety?0:(parseInt(g('kpi_count_'+k.id)?.value)||0),
+      count:(!isSafety&&!isOmission)?(parseInt(g('kpi_count_'+k.id)?.value)||0):0,
       violations:isSafety?(parseInt(g('kpi_vio_'+k.id)?.value)||0):0,
       lti:isSafety?(parseInt(g('kpi_lti_'+k.id)?.value)||0):0,
+      omission:isOmission?(parseInt(g('kpi_omission_'+k.id)?.value)||0):undefined,
+      edge_rate:isOmission?(parseFloat(g('kpi_edge_'+k.id)?.value)||0):undefined,
     };
   });
   S.performances[perfKey]={...S.performances[perfKey]||{},kpiData,status:'draft',quarter:qtr,staffId:sid};
@@ -2019,12 +2078,15 @@ async function submitPerf(perfKey){
   let hasAny=false;
   S.staffKPIs.forEach(k=>{
     const isSafety=isSafetyKPI(k);
+    const isOmission=isOmissionKPI(k);
     const v=g('kpi_content_'+k.id)?.value||'';
-    const cnt=isSafety?0:(parseInt(g('kpi_count_'+k.id)?.value)||0);
+    const cnt=(!isSafety&&!isOmission)?(parseInt(g('kpi_count_'+k.id)?.value)||0):0;
     const vio=isSafety?(parseInt(g('kpi_vio_'+k.id)?.value)||0):0;
     const lti=isSafety?(parseInt(g('kpi_lti_'+k.id)?.value)||0):0;
-    kpiData[k.id]={content:v,count:cnt,violations:vio,lti};
-    if(v.trim()||cnt>0||vio>0||lti>0)hasAny=true;
+    const omission=isOmission?(parseInt(g('kpi_omission_'+k.id)?.value)||0):undefined;
+    const edge_rate=isOmission?(parseFloat(g('kpi_edge_'+k.id)?.value)||0):undefined;
+    kpiData[k.id]={content:v,count:cnt,violations:vio,lti,omission,edge_rate};
+    if(v.trim()||cnt>0||vio>0||lti>0||(omission!==undefined)||(edge_rate!==undefined))hasAny=true;
   });
   if(!hasAny){toast('최소 1개 항목 이상 실적을 입력해주세요','warn');return;}
   const submittedAt=new Date().toLocaleDateString('ko-KR');
@@ -2120,6 +2182,18 @@ async function runAutoCalc(){
   }
   toast(`⚡ 자동 등급 계산 완료 (${S.staffKPIs.length}개 KPI × ${S.staff.filter(s=>s.status==='approved').length}명)`, 'success');
   render();
+}
+
+// 업무누락 점수 실시간 미리보기
+function updateOmissionPreview(kpiId){
+  const omission=parseInt(document.getElementById('kpi_omission_'+kpiId)?.value||0);
+  const edge=parseFloat(document.getElementById('kpi_edge_'+kpiId)?.value||100);
+  const score=calcOmissionPreview(edge,omission);
+  const el=document.getElementById('omission_preview_'+kpiId);
+  if(el){
+    el.textContent='→ '+score+'점';
+    el.style.color=score>=80?'#065f46':score>=60?'#92400e':'#991b1b';
+  }
 }
 
 // 안전 점수 실시간 미리보기
