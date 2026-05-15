@@ -922,10 +922,16 @@ async function saveMgr(){
     }
 
     if(authUserId){
-      await dbUpsert('profiles',{
-        id:authUserId,name:nm,role:'manager',title:'센터장',
-        org:cname,center_id:cid,manager_id:mgrRow.id,must_change_password:true,
-      },'id');
+      await new Promise(r=>setTimeout(r,600)); // 트리거 실행 대기
+      try{
+        await dbClient.from('profiles').update({
+          name:nm, role:'manager', title:'센터장',
+          org:cname, center_id:cid, manager_id:mgrRow.id,
+          must_change_password:true,
+        }).eq('id',authUserId);
+      }catch(pe){
+        console.warn('profiles 업데이트 오류:',pe.message);
+      }
     }
 
     S.managers.push({id:mgrRow.id,name:nm,centerId:cid,email:em,joinDate:jd,status:st});
@@ -1479,19 +1485,17 @@ async function addStaffByMgr(){
       closeModal();render();return;
     }
 
-    // ③ profiles 업데이트 (Auth 성공 시)
+    // ③ profiles 업데이트 (트리거가 생성한 행을 UPDATE)
     if(authUserId){
-      await dbUpsert('profiles',{
-        id:authUserId,
-        name:nm,
-        role:'staff',
-        title:'센터원',
-        org:getCenterName(cid),
-        center_id:cid,
-        staff_id:staffRow.id,
-        manager_id:S.user.managerId||null,
-        must_change_password:true,
-      },'id');
+      await new Promise(r=>setTimeout(r,600));
+      try{
+        await dbClient.from('profiles').update({
+          name:nm, role:'staff', title:'센터원',
+          org:getCenterName(cid), center_id:cid,
+          staff_id:staffRow.id, manager_id:S.user.managerId||null,
+          must_change_password:true,
+        }).eq('id',authUserId);
+      }catch(pe){ console.warn('profiles 업데이트 오류:',pe.message); }
     }
 
     S.staff.push({id:staffRow.id,name:nm,email:em,centerId:cid,joinDate:jd,status:'approved'});
