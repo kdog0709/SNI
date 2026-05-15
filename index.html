@@ -231,11 +231,8 @@ body{font-family:-apple-system,'Apple SD Gothic Neo','Noto Sans KR',sans-serif;b
 // ══════════════════════════════════════════
 //  SUPABASE (설정 전 데모 모드로 동작)
 // ══════════════════════════════════════════
-//const SUPABASE_URL  = 'https://YOUR_PROJECT_ID.supabase.co';
-//const SUPABASE_ANON = 'YOUR_ANON_PUBLIC_KEY';
-const SUPABASE_URL  = 'https://wdbndirmgzvcshoioqet.supabase.co';   // ← 교체
-const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndkYm5kaXJtZ3p2Y3Nob2lvcWV0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMzE2NzUsImV4cCI6MjA5MTYwNzY3NX0.HuWhoBPhcHZmGS2wFu8vWA402hu3n-OCA0KYVxC9CAQ';                  // ← 교체
-
+const SUPABASE_URL  = 'https://YOUR_PROJECT_ID.supabase.co';
+const SUPABASE_ANON = 'YOUR_ANON_PUBLIC_KEY';
 const DEMO_MODE = SUPABASE_URL.includes('YOUR_PROJECT_ID');
 let dbClient = DEMO_MODE ? null : window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
 
@@ -884,53 +881,62 @@ function modalAddMgr(){
   <div class="fg"><label class="fl">소속 센터 *</label><select class="fs" id="m_cid">${opts}</select></div>
   <div class="frow"><div class="fg"><label class="fl">신청일</label><input class="fi" id="m_dt" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
   <div class="fg"><label class="fl">상태</label><select class="fs" id="m_st"><option value="pending">대기</option><option value="approved">승인</option></select></div></div>
+  <div class="fg"><label class="fl">임시 비밀번호 *</label><input class="fi" id="m_pw" type="text" value="Sni2026!@#" placeholder="대문자+숫자+특수문자 8자 이상"></div>
+  <div style="font-size:10px;color:#888;margin-top:-6px">첫 로그인 후 비밀번호 변경 안내됩니다</div>
   <div class="mfoot"><button class="btn btn-gray" onclick="closeModal()">취소</button><button class="btn btn-pink" onclick="saveMgr()">저장</button></div>`);
 }
 async function saveMgr(){
   const nm=g('m_nm')?.value?.trim(),em=g('m_em')?.value?.trim();
   if(!nm||!em)return alert('이름과 이메일을 입력하세요');
   const cid=parseInt(g('m_cid')?.value),jd=g('m_dt')?.value,st=g('m_st')?.value;
-  const DEFAULT_PW='sni99999!@#';
+  const pw=g('m_pw')?.value?.trim()||'Sni2026!@#';
   const cname=getCenterName(cid);
 
+  // 비밀번호 유효성
+  if(!DEMO_MODE && pw && (pw.length<8||!/[A-Z]/.test(pw)||!/[0-9]/.test(pw)||!/[^A-Za-z0-9]/.test(pw))){
+    toast('비밀번호: 대문자+숫자+특수문자 포함 8자 이상이어야 합니다','warn');return;
+  }
+
   if(!DEMO_MODE && dbClient){
-    // ① managers 테이블 INSERT
     const mgrRow=await dbInsert('managers',{name:nm,center_id:cid,email:em,join_date:jd,status:st});
     if(!mgrRow){ return; }
 
-    // ② Auth 사용자 생성
     let authUserId=null;
     try{
       const {data:authData,error:authErr}=await dbClient.auth.signUp({
-        email:em, password:DEFAULT_PW,
-        options:{data:{name:nm, role:'manager'}}
+        email:em,password:pw,
+        options:{data:{name:nm,role:'manager'},emailRedirectTo:window.location.origin}
       });
-      if(authErr) throw authErr;
-      authUserId=authData?.user?.id||authData?.session?.user?.id;
+      if(authErr){
+        if(authErr.message?.includes('already registered')) toast('⚠ 이미 등록된 이메일입니다','warn');
+        else throw authErr;
+      } else {
+        authUserId=authData?.user?.id||authData?.session?.user?.id;
+      }
     }catch(authE){
-      console.warn('Auth 생성 오류:',authE.message);
-      toast('계정 생성 오류: '+authE.message,'warn');
+      console.warn('[Auth 오류]',authE.message);
+      toast('⚠ Auth 오류: '+authE.message+' (센터장 정보는 등록됨)','warn');
     }
 
-    // ③ profiles 업데이트
     if(authUserId){
       await dbUpsert('profiles',{
-        id:authUserId,
-        name:nm,
-        role:'manager',
-        title:'센터장',
-        org:cname,
-        center_id:cid,
-        manager_id:mgrRow.id,
-        must_change_password:true,
+        id:authUserId,name:nm,role:'manager',title:'센터장',
+        org:cname,center_id:cid,manager_id:mgrRow.id,must_change_password:true,
       },'id');
     }
 
     S.managers.push({id:mgrRow.id,name:nm,centerId:cid,email:em,joinDate:jd,status:st});
-    toast(`✅ ${nm} 등록 완료 | 임시 비밀번호: ${DEFAULT_PW}`);
+    showModal(`<div class="mtitle">✅ 센터장 등록 완료</div>
+    <div style="background:#d1fae5;border-radius:8px;padding:12px 14px;margin-bottom:12px">
+      <table style="width:100%;font-size:12px"><tr><td style="color:#888">이름</td><td style="font-weight:700;text-align:right">${esc(nm)}</td></tr>
+      <tr><td style="color:#888">이메일</td><td style="font-weight:600;text-align:right">${esc(em)}</td></tr>
+      <tr><td style="color:#888">임시 비밀번호</td><td style="font-weight:700;text-align:right;color:#e91e8c">${esc(pw)}</td></tr></table>
+    </div>
+    <div class="mfoot"><button class="btn btn-pink" onclick="closeModal();render()">확인</button></div>`);
   } else {
     S.managers.push({id:Date.now(),name:nm,centerId:cid,email:em,joinDate:jd,status:st});
-    toast(nm+' 센터장이 추가되었습니다 (데모)');
+    toast(nm+' 센터장이 추가되었습니다');
+    closeModal();render();
   }
   closeModal();render();
 }
@@ -1414,39 +1420,70 @@ async function doChangePw(forced=true){
   }catch(e){toast('변경 오류: '+e.message,'error');}
 }
 
+function modalAddStaffMgr(){
+  showModal(`<div class="mtitle">센터원 추가</div>
+  <div class="frow"><div class="fg"><label class="fl">이름 *</label><input class="fi" id="sf_nm"></div><div class="fg"><label class="fl">이메일 *</label><input class="fi" id="sf_em" type="email"></div></div>
+  <div class="frow"><div class="fg"><label class="fl">입사일</label><input class="fi" id="sf_dt" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+  <div class="fg"><label class="fl">임시 비밀번호 *</label><input class="fi" id="sf_pw" type="text" value="Sni2026!@#" placeholder="대문자+숫자+특수문자 포함 8자+"></div></div>
+  <div style="background:#e8f4fd;border-radius:8px;padding:9px 12px;font-size:11px;color:#1e40af;margin-top:6px">
+    💡 임시 비밀번호는 첫 로그인 후 변경하도록 안내하세요.<br>
+    조건: 대문자 포함, 숫자 포함, 특수문자 포함, 8자 이상
+  </div>
+  <div class="mfoot"><button class="btn btn-gray" onclick="closeModal()">취소</button><button class="btn btn-pink" onclick="addStaffByMgr()">저장</button></div>`);
+}
 async function addStaffByMgr(){
   const nm=g('sf_nm')?.value?.trim(),em=g('sf_em')?.value?.trim();
-  if(!nm||!em)return alert('필수 항목 입력');
+  const pw=g('sf_pw')?.value?.trim()||'Sni2026!@#';
+  if(!nm||!em)return alert('이름과 이메일을 입력하세요');
+  // 비밀번호 기본 유효성 검사
+  if(pw.length<8||!/[A-Z]/.test(pw)||!/[0-9]/.test(pw)||!/[^A-Za-z0-9]/.test(pw)){
+    toast('비밀번호: 대문자+숫자+특수문자 포함 8자 이상이어야 합니다','warn');return;
+  }
   const cid=S.user.centerId,jd=g('sf_dt')?.value;
-  const DEFAULT_PW='sni99999!@#';
 
   if(!DEMO_MODE && dbClient){
     // ① staff 테이블 INSERT
     const staffRow=await dbInsert('staff',{name:nm,email:em,center_id:cid,join_date:jd,status:'approved'});
     if(!staffRow){ return; }
 
-    // ② Supabase Auth 사용자 생성 (signUp - 이메일 인증 비활성화 필요)
+    // ② Supabase Auth 계정 생성
     let authUserId=null;
     try{
       const {data:authData,error:authErr}=await dbClient.auth.signUp({
-        email:em, password:DEFAULT_PW,
-        options:{data:{name:nm, role:'staff'}}
+        email:em,
+        password:pw,
+        options:{
+          data:{name:nm,role:'staff'},
+          emailRedirectTo:window.location.origin
+        }
       });
-      if(authErr) throw authErr;
-      authUserId=authData?.user?.id||authData?.session?.user?.id;
+      if(authErr){
+        // 이미 등록된 이메일인 경우 → 기존 유저 찾기
+        if(authErr.message?.includes('already registered')||authErr.message?.includes('already been registered')){
+          toast('⚠ 이미 등록된 이메일입니다. staff 정보만 업데이트됩니다.','warn');
+        } else {
+          throw authErr;
+        }
+      } else {
+        authUserId=authData?.user?.id||authData?.session?.user?.id;
+      }
     }catch(authE){
-      console.warn('Auth 생성 오류 (이미 존재하거나 이메일 중복):',authE.message);
-      toast('계정 생성 오류: '+authE.message+' (이미 존재하는 이메일일 수 있습니다)','warn');
+      // Auth 생성 실패해도 staff 등록은 완료 처리
+      console.warn('[Auth 생성 오류]',authE.message);
+      toast('⚠ Auth 오류: '+authE.message+' (staff 정보는 등록됨)','warn');
+      S.staff.push({id:staffRow.id,name:nm,email:em,centerId:cid,joinDate:jd,status:'approved'});
+      showAuthManualGuide(nm,em,pw);
+      closeModal();render();return;
     }
 
-    // ③ profiles 테이블 업데이트 (Auth 성공 시)
+    // ③ profiles 업데이트 (Auth 성공 시)
     if(authUserId){
       await dbUpsert('profiles',{
         id:authUserId,
         name:nm,
         role:'staff',
         title:'센터원',
-        org:S.user.org||getCenterName(cid),
+        org:getCenterName(cid),
         center_id:cid,
         staff_id:staffRow.id,
         manager_id:S.user.managerId||null,
@@ -1455,12 +1492,34 @@ async function addStaffByMgr(){
     }
 
     S.staff.push({id:staffRow.id,name:nm,email:em,centerId:cid,joinDate:jd,status:'approved'});
-    toast(`✅ ${nm} 등록 완료 | 임시 비밀번호: ${DEFAULT_PW}`);
+    showModal(`<div class="mtitle">✅ 센터원 등록 완료</div>
+    <div style="background:#d1fae5;border-radius:8px;padding:12px 14px;margin-bottom:12px">
+      <div style="font-size:13px;font-weight:700;color:#065f46;margin-bottom:4px">${esc(nm)} 등록 완료</div>
+      <table style="width:100%;font-size:12px"><tr><td style="color:#888">이메일</td><td style="font-weight:600;text-align:right">${esc(em)}</td></tr>
+      <tr><td style="color:#888">임시 비밀번호</td><td style="font-weight:700;text-align:right;color:#e91e8c">${esc(pw)}</td></tr>
+      <tr><td style="color:#888">소속</td><td style="font-weight:600;text-align:right">${esc(getCenterName(cid))}</td></tr></table>
+    </div>
+    <div style="font-size:11px;color:#888;margin-bottom:8px">📋 위 임시 비밀번호를 센터원에게 전달하세요. 첫 로그인 후 비밀번호를 변경하도록 안내하세요.</div>
+    <div class="mfoot"><button class="btn btn-pink" onclick="closeModal();render()">확인</button></div>`);
   } else {
     S.staff.push({id:Date.now(),name:nm,email:em,centerId:cid,joinDate:jd,status:'approved'});
-    toast(nm+' 센터원이 등록되었습니다 (데모)');
+    toast(nm+' 센터원이 등록되었습니다');
+    closeModal();render();
   }
-  closeModal();render();
+}
+// Auth 수동 등록 안내 모달
+function showAuthManualGuide(nm,em,pw){
+  setTimeout(()=>showModal(`<div class="mtitle">⚠ Auth 계정 수동 등록 필요</div>
+  <div style="font-size:12px;color:#555;margin-bottom:12px">아래 방법으로 Supabase에서 직접 계정을 등록해주세요:</div>
+  <div style="background:#f8f9fa;border-radius:8px;padding:12px 14px;font-size:12px;line-height:1.8">
+    1. <a href="https://supabase.com" target="_blank" style="color:#3b82f6">supabase.com</a> → 프로젝트 → Authentication → Users<br>
+    2. <strong>Add user</strong> 클릭<br>
+    3. 이메일: <strong style="color:#e91e8c">${esc(em)}</strong><br>
+    4. 비밀번호: <strong style="color:#e91e8c">${esc(pw)}</strong><br>
+    5. 저장 후 SQL Editor에서:<br>
+    <code style="background:#eee;padding:2px 6px;border-radius:4px;font-size:11px">UPDATE profiles SET name='${esc(nm)}', role='staff', staff_id=... WHERE id=...;</code>
+  </div>
+  <div class="mfoot"><button class="btn btn-pink" onclick="closeModal()">확인</button></div>`),200);
 }
 async function deleteStaffByMgr(id){
   if(!confirm('센터원을 삭제하시겠습니까?')) return;
