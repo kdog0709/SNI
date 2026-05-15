@@ -1578,45 +1578,52 @@ function showAuthManualGuide(nm,em,pw){
   <div class="mfoot"><button class="btn btn-pink" onclick="closeModal()">확인</button></div>`),200);
 }
 async function deleteStaffByMgr(rawId){
-  const id=parseInt(rawId); // 타입 통일 (string→number)
-  if(!confirm('센터원을 삭제하시겠습니까?\n(계정 및 모든 데이터가 삭제됩니다)')) return;
+  const id=parseInt(rawId);
+  if(!confirm('센터원을 삭제하시겠습니까?')) return;
   const s=S.staff.find(x=>parseInt(x.id)===id);
+  console.log('[삭제 시작] id='+id+', staff=', s, 'DEMO_MODE='+DEMO_MODE);
+
   if(!DEMO_MODE && dbClient){
-    toast('삭제 처리 중...','info');
-    const errors=[];
-    // ① 연관 데이터 순서대로 삭제
-    const tables=[
-      {t:'performances',col:'staff_id'},
-      {t:'agreements',  col:'staff_id'},
-      {t:'reviews',     col:'staff_id'},
-    ];
-    for(const {t,col} of tables){
-      const {error:e}=await dbClient.from(t).delete().eq(col,id);
-      if(e) errors.push(`${t}: ${e.message}`);
-    }
-    // evaluations (복수 조건)
-    const {error:evE}=await dbClient.from('evaluations').delete()
-      .eq('evaluatee_id',id).eq('evaluatee_type','staff');
-    if(evE) errors.push('evaluations: '+evE.message);
-    // safety_data (ekey 기준)
-    await dbClient.from('safety_data').delete().eq('ekey','stf_'+id).catch(()=>{});
-    // ② profiles 삭제 (staff_id 기준)
-    const {error:pE}=await dbClient.from('profiles').delete().eq('staff_id',id);
-    if(pE) errors.push('profiles: '+pE.message);
-    // ③ staff 삭제
-    const {error:sE}=await dbClient.from('staff').delete().eq('id',id);
-    if(sE){ errors.push('staff: '+sE.message); }
-    if(errors.length){
-      console.error('[삭제 오류]', errors);
-      toast('삭제 오류: '+errors[0],'error');
+    try{
+      // ① 연관 데이터 삭제 (FK 순서 주의)
+      await dbClient.from('evaluations').delete().eq('evaluatee_id',id).eq('evaluatee_type','staff');
+      await dbClient.from('performances').delete().eq('staff_id',id);
+      await dbClient.from('agreements').delete().eq('staff_id',id);
+      await dbClient.from('reviews').delete().eq('staff_id',id);
+      await dbClient.from('safety_data').delete().eq('ekey','stf_'+id);
+
+      // ② profiles 삭제 (FK 해제 후)
+      const {error:pE, data:pD}=await dbClient.from('profiles').delete().eq('staff_id',id).select();
+      console.log('[profiles 삭제]', pD, pE);
+      if(pE) console.warn('profiles 삭제 오류:', pE.message);
+
+      // ③ staff 테이블 삭제
+      const {error:sE, data:sD}=await dbClient.from('staff').delete().eq('id',id).select();
+      console.log('[staff 삭제]', sD, sE);
+      if(sE){
+        toast('staff 삭제 오류: '+sE.message,'error');
+        console.error('[staff 삭제 실패]', sE);
+        return;
+      }
+      if(!sD||sD.length===0){
+        // 삭제된 행이 없음 = RLS 또는 FK 문제
+        toast('삭제 실패: 권한 또는 FK 제약 문제입니다. Supabase SQL을 확인하세요.','error');
+        console.error('[staff 삭제 0건] id='+id+' - RLS 또는 FK 문제');
+        return;
+      }
+      console.log('[삭제 완료] '+sD.length+'건');
+    }catch(e){
+      toast('삭제 오류: '+e.message,'error');
+      console.error('[삭제 예외]', e);
       return;
     }
   }
+
+  // 메모리 & 로컬 상태 정리
   S.staff=S.staff.filter(x=>parseInt(x.id)!==id);
-  // 메모리 정리
-  delete S.performances[id]; delete S.agreements[id]; delete S.reviews[id];
+  delete S.agreements[id]; delete S.reviews[id];
   delete S.staffEvals['stf_'+id]; delete S.safetyData['stf_'+id];
-  Object.keys(S.performances).filter(k=>k.startsWith(id+'__')).forEach(k=>delete S.performances[k]);
+  Object.keys(S.performances).filter(k=>k===String(id)||k.startsWith(id+'__')||k.startsWith(String(id)+'__')).forEach(k=>delete S.performances[k]);
   saveLocal();
   toast((s?.name||'센터원')+'이(가) 삭제되었습니다','info');
   render();
